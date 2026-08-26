@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "Qsirch Floating Search"
-APP_VERSION = "v10.3"
+APP_VERSION = "v10.4"
 COMPACT_HEIGHT = 132
 BASE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 CONFIG = BASE_DIR / "config.json"
@@ -613,7 +613,7 @@ class Settings(QDialog):
         self.ssl_warning = QLabel("")
         self.ssl_warning.setWordWrap(True)
         self.ssl_warning.setStyleSheet("color: #ffcf7a;")
-        self.ssl.stateChanged.connect(self.update_ssl_warning)
+        self.ssl.stateChanged.connect(self.ssl_toggled)
         self.port.valueChanged.connect(self.update_ssl_warning)
         cf.addRow("NAS host / IP", self.host)
         cf.addRow("Port", self.port)
@@ -755,6 +755,13 @@ class Settings(QDialog):
             self.ssl_warning.setText("HTTPS is enabled on port 8080. If the NAS uses 8080 for HTTP, either uncheck HTTPS or choose the NAS HTTPS port.")
         else:
             self.ssl_warning.clear()
+
+    def ssl_toggled(self):
+        if self.ssl.isChecked() and self.port.value() == 8080:
+            self.port.setValue(443)
+        elif not self.ssl.isChecked() and self.port.value() == 443:
+            self.port.setValue(8080)
+        self.update_ssl_warning()
 
     def _mapping_dialog(self, source="", target=""):
         d = QDialog(self)
@@ -1021,12 +1028,12 @@ class Main(QWidget):
         self.version_label.setToolTip("Running build version")
         self.version_label.installEventFilter(self)
 
-        self.pin_btn=QPushButton("Pinned")
+        self.pin_btn=QPushButton("Always on top")
         self.pin_btn.setObjectName("pinButton")
         self.pin_btn.setToolTip("Keep the search window always on top")
         self.pin_btn.setCheckable(True)
         self.pin_btn.setChecked(self.pinned)
-        self.pin_btn.setFixedWidth(72)
+        self.pin_btn.setFixedWidth(112)
         self.pin_btn.setMinimumHeight(36)
         self.pin_btn.clicked.connect(self.toggle_pin)
         top.addWidget(self.pin_btn)
@@ -1179,7 +1186,7 @@ class Main(QWidget):
         if not hasattr(self, "pin_btn"):
             return
         self.pin_btn.setChecked(self.pinned)
-        self.pin_btn.setText("Pinned" if self.pinned else "Pin")
+        self.pin_btn.setText("Always on top" if self.pinned else "On top")
 
     def toggle_pin(self):
         self.pinned = bool(self.pin_btn.isChecked())
