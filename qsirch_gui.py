@@ -16,7 +16,8 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "Qsirch Floating Search"
-APP_VERSION = "v10"
+APP_VERSION = "v10.2"
+COMPACT_HEIGHT = 132
 BASE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 CONFIG = BASE_DIR / "config.json"
 
@@ -59,8 +60,11 @@ class QsirchClient:
     def login(self, user, pw):
         self.user, self.pw = user, pw
         b64 = base64.b64encode(pw.encode()).decode()
-        r = self.s.post(self.base + "/cgi-bin/authLogin.cgi",
-                        data={"user": user, "pwd": b64}, timeout=10)
+        try:
+            r = self.s.post(self.base + "/cgi-bin/authLogin.cgi",
+                            data={"user": user, "pwd": b64}, timeout=10)
+        except requests.exceptions.SSLError as e:
+            raise RuntimeError(self.ssl_error_message(e))
         r.raise_for_status()
         x = ET.fromstring(r.text)
         if x.findtext("authPassed") != "1":
@@ -71,16 +75,35 @@ class QsirchClient:
         self.s.cookies.set("NAS_SID", sid)
 
     def request(self, method, path, **kw):
-        r = self.s.request(method, self.base + path, timeout=15, **kw)
+        try:
+            r = self.s.request(method, self.base + path, timeout=15, **kw)
+        except requests.exceptions.SSLError as e:
+            raise RuntimeError(self.ssl_error_message(e))
         if r.status_code == 401:
             try:
                 if r.json().get("error", {}).get("code") == 101:
                     self.login(self.user, self.pw)
-                    r = self.s.request(method, self.base + path, timeout=15, **kw)
+                    try:
+                        r = self.s.request(method, self.base + path, timeout=15, **kw)
+                    except requests.exceptions.SSLError as e:
+                        raise RuntimeError(self.ssl_error_message(e))
+            except RuntimeError:
+                raise
             except Exception:
                 pass
         r.raise_for_status()
         return r
+
+    def ssl_error_message(self, err):
+        msg = str(err)
+        hint = (
+            "HTTPS failed during the SSL handshake. This usually means HTTPS is enabled "
+            "in Settings but the selected port is serving plain HTTP. Uncheck HTTPS for "
+            "the HTTP port, or keep HTTPS enabled and use the NAS HTTPS port."
+        )
+        if "WRONG_VERSION_NUMBER" in msg.upper() or "wrong version number" in msg.lower():
+            return hint
+        return f"{hint}\n\nDetails: {msg}"
 
     @staticmethod
     def path(item):
@@ -565,11 +588,18 @@ class Settings(QDialog):
         self.pw.setEchoMode(QLineEdit.Password)
         self.ssl = QCheckBox("Use HTTPS")
         self.ssl.setChecked(self.cfg.get("ssl",False))
+        self.ssl_warning = QLabel("")
+        self.ssl_warning.setWordWrap(True)
+        self.ssl_warning.setStyleSheet("color: #ffcf7a;")
+        self.ssl.stateChanged.connect(self.update_ssl_warning)
+        self.port.valueChanged.connect(self.update_ssl_warning)
         cf.addRow("NAS host / IP", self.host)
         cf.addRow("Port", self.port)
         cf.addRow("Username", self.user)
         cf.addRow("Password", self.pw)
         cf.addRow("", self.ssl)
+        cf.addRow("", self.ssl_warning)
+        self.update_ssl_warning()
         self.tabs.addTab(conn, "Connection")
 
         behavior = QWidget()
@@ -694,6 +724,12 @@ class Settings(QDialog):
         self.map_table.insertRow(row)
         self.map_table.setItem(row, 0, QTableWidgetItem(source))
         self.map_table.setItem(row, 1, QTableWidgetItem(target))
+
+    def update_ssl_warning(self):
+        if self.ssl.isChecked() and self.port.value() == 8080:
+            self.ssl_warning.setText("HTTPS is enabled on port 8080. If the NAS uses 8080 for HTTP, either uncheck HTTPS or choose the NAS HTTPS port.")
+        else:
+            self.ssl_warning.clear()
 
     def _mapping_dialog(self, source="", target=""):
         d = QDialog(self)
@@ -906,6 +942,7 @@ class Main(QWidget):
         top=QHBoxLayout()
         top.setSpacing(8)
         self.search=QLineEdit(); self.search.setPlaceholderText("Search Qsirch")
+        self.search.setMinimumHeight(40)
         self.search.setClearButtonEnabled(False)
         self.search.returnPressed.connect(self.do_search)
         self.search.textChanged.connect(self.query_changed)
@@ -916,6 +953,7 @@ class Main(QWidget):
         self.clear_btn.setObjectName("toolButton")
         self.clear_btn.setToolTip("Clear search")
         self.clear_btn.setFixedWidth(58)
+        self.clear_btn.setMinimumHeight(36)
         self.clear_btn.setEnabled(False)
         self.clear_btn.clicked.connect(self.clear_search)
         top.addWidget(self.clear_btn)
@@ -931,6 +969,7 @@ class Main(QWidget):
         self.pin_btn.setCheckable(True)
         self.pin_btn.setChecked(self.pinned)
         self.pin_btn.setFixedWidth(72)
+        self.pin_btn.setMinimumHeight(36)
         self.pin_btn.clicked.connect(self.toggle_pin)
         top.addWidget(self.pin_btn)
         self.update_pin_button()
@@ -939,6 +978,7 @@ class Main(QWidget):
         self.gear.setObjectName("toolButton")
         self.gear.setToolTip("Qsirch connection settings")
         self.gear.setFixedWidth(78)
+        self.gear.setMinimumHeight(36)
         self.gear.clicked.connect(self.settings)
         top.addWidget(self.gear)
 
@@ -946,6 +986,7 @@ class Main(QWidget):
         self.hide_btn.setObjectName("toolButton")
         self.hide_btn.setToolTip("Hide to tray")
         self.hide_btn.setFixedWidth(56)
+        self.hide_btn.setMinimumHeight(36)
         self.hide_btn.clicked.connect(self.hide)
         top.addWidget(self.hide_btn)
 
@@ -953,6 +994,7 @@ class Main(QWidget):
         self.exit_btn.setObjectName("exitButton")
         self.exit_btn.setToolTip("Exit Qsirch Floating Search")
         self.exit_btn.setFixedWidth(52)
+        self.exit_btn.setMinimumHeight(36)
         self.exit_btn.clicked.connect(self.quit_app)
         top.addWidget(self.exit_btn)
         v.addLayout(top)
@@ -982,12 +1024,12 @@ class Main(QWidget):
         v.addWidget(self.list,1)
 
         bottom=QHBoxLayout()
-        self.hint=QLabel("Enter to search  •  Double-click opens file  •  Explorer shows location  •  Esc to hide")
+        bottom.addWidget(self.version_label)
+        self.hint=QLabel("Enter to search  •  Double-click/Open opens file  •  Show opens Explorer  •  Esc to hide")
         self.hint.setObjectName("hint")
         self.hint.installEventFilter(self)
         bottom.addWidget(self.hint)
         bottom.addStretch()
-        bottom.addWidget(self.version_label)
         v.addLayout(bottom)
 
         self.busy = QProgressBar()
@@ -1242,9 +1284,10 @@ class Main(QWidget):
         self.list.setVisible(not compact)
         self.hint.setVisible(not compact)
         if compact:
-            self.setMinimumHeight(0)
-            self.resize(self.width(), 92)
+            self.setMinimumHeight(COMPACT_HEIGHT)
+            self.resize(self.width(), COMPACT_HEIGHT)
         elif self.height() < 420:
+            self.setMinimumHeight(0)
             self.resize(self.width(), 560)
 
     def update_compact_state(self):
@@ -1261,9 +1304,10 @@ class Main(QWidget):
             self.hint.setVisible(not compact)
 
         if compact:
-            self.setMinimumHeight(0)
-            self.resize(self.width(), 92)
+            self.setMinimumHeight(COMPACT_HEIGHT)
+            self.resize(self.width(), COMPACT_HEIGHT)
         else:
+            self.setMinimumHeight(0)
             if self.height() < 420:
                 self.resize(self.width(), 560)
 
