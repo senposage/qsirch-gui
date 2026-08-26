@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.IO;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -15,6 +17,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly AppConfig _config = ConfigStore.Load();
     private readonly ObservableCollection<SearchResult> _allResults = [];
     private readonly HistoryStore _history;
+    private readonly PathMapper _mapper;
     private readonly ShellActions _shell;
     private ResultRules _rules;
     private string _query = "";
@@ -33,7 +36,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         InitializeComponent();
         _history = new HistoryStore(_config);
-        _shell = new ShellActions(new PathMapper(_config));
+        _mapper = new PathMapper(_config);
+        _shell = new ShellActions(_mapper);
         _rules = new ResultRules(_config);
         DataContext = this;
         LoadFavorites();
@@ -228,7 +232,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void ResultSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         var result = SelectedResult();
-        PreviewText = result == null ? "Select a result to preview." : $"{result.FileName}\r\n{result.DisplayPath}\r\n{result.Kind} {result.SizeText}".Trim();
+        ShowPreviewSummary(result);
+        if (_config.Behavior.PreviewPane)
+        {
+            _ = LoadPreviewAsync(result);
+        }
     }
 
     private void ResultDoubleClicked(object sender, MouseButtonEventArgs e)
@@ -252,9 +260,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void FavoriteSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (FavoritesList.SelectedItem is SearchResult result)
+        var result = FavoritesList.SelectedItem as SearchResult;
+        ShowPreviewSummary(result);
+        if (_config.Behavior.PreviewPane)
         {
-            PreviewText = $"{result.FileName}\r\n{result.DisplayPath}\r\n{result.Kind} {result.SizeText}".Trim();
+            _ = LoadPreviewAsync(result);
         }
     }
 
@@ -366,6 +376,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void PreviewToggleClicked(object sender, RoutedEventArgs e)
     {
         _config.Behavior.PreviewPane = !_config.Behavior.PreviewPane;
+        ApplyBehavior();
+        ConfigStore.Save(_config);
+        if (_config.Behavior.PreviewPane)
+        {
+            _ = LoadPreviewAsync(CurrentPreviewResult());
+        }
+    }
+
+    private void HidePreviewClicked(object sender, RoutedEventArgs e)
+    {
+        _config.Behavior.PreviewPane = false;
         ApplyBehavior();
         ConfigStore.Save(_config);
     }
@@ -514,7 +535,98 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         Topmost = _config.AlwaysOnTop;
         ShowInTaskbar = _config.Behavior.ShowInTaskbar;
         PreviewPane.Visibility = _config.Behavior.PreviewPane ? Visibility.Visible : Visibility.Collapsed;
+        PreviewSplitter.Visibility = _config.Behavior.PreviewPane ? Visibility.Visible : Visibility.Collapsed;
         PreviewToggle.FontWeight = _config.Behavior.PreviewPane ? FontWeights.SemiBold : FontWeights.Normal;
+    }
+
+    private SearchResult? CurrentPreviewResult()
+    {
+        return SelectedResult() ?? FavoritesList.SelectedItem as SearchResult;
+    }
+
+    private void ShowPreviewSummary(SearchResult? result)
+    {
+        if (result == null)
+        {
+            PreviewTitle.Text = "Preview";
+            PreviewText = "Select a result to preview.";
+            return;
+        }
+        PreviewTitle.Text = result.FileName;
+        PreviewText = $"{result.FileName}\r\n{result.DisplayPath}\r\n{result.Kind} {result.SizeText}".Trim();
+    }
+
+    private async Task LoadPreviewAsync(SearchResult? result)
+    {
+        if (result == null)
+        {
+            ShowPreviewSummary(null);
+            return;
+        }
+
+        PreviewTitle.Text = result.FileName;
+        PreviewText = "Loading preview...";
+        var preview = await Task.Run(() => BuildLocalPreview(result));
+        if (CurrentPreviewResult() == result && _config.Behavior.PreviewPane)
+        {
+            PreviewText = preview;
+        }
+    }
+
+    private string BuildLocalPreview(SearchResult result)
+    {
+        var header = $"{result.FileName}\r\n{result.DisplayPath}\r\n{result.Kind} {result.SizeText}".Trim();
+        if (result.IsFolder)
+        {
+            return header;
+        }
+
+        string path;
+        try
+        {
+            path = _mapper.Resolve(result);
+        }
+        catch (Exception ex)
+        {
+            return $"{header}\r\n\r\nPreview unavailable: {ex.Message}";
+        }
+
+        if (!File.Exists(path))
+        {
+            return $"{header}\r\n\r\nPreview unavailable: mapped file was not found.";
+        }
+        if (!IsTextPreviewType(result.Extension))
+        {
+            return $"{header}\r\n\r\nNo local text preview is available for this file type yet.";
+        }
+
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            var builder = new StringBuilder();
+            for (var i = 0; i < 180 && !reader.EndOfStream; i++)
+            {
+                builder.AppendLine(reader.ReadLine());
+                if (builder.Length > 24000)
+                {
+                    break;
+                }
+            }
+            return $"{header}\r\n\r\n{builder}".TrimEnd();
+        }
+        catch (Exception ex)
+        {
+            return $"{header}\r\n\r\nPreview unavailable: {ex.Message}";
+        }
+    }
+
+    private static bool IsTextPreviewType(string extension)
+    {
+        return new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "txt", "csv", "log", "md", "json", "xml", "html", "htm", "css", "js", "ts", "py", "ps1", "bat", "cmd", "sql"
+        }.Contains(extension.TrimStart('.'));
     }
 
     private void LoadFavorites()

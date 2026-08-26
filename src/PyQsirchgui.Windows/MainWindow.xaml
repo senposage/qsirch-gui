@@ -110,7 +110,9 @@
     <Grid Grid.Row="3" Margin="8,4,8,4">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="190" />
+        <ColumnDefinition Width="5" />
         <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="5" />
         <ColumnDefinition Width="320" />
       </Grid.ColumnDefinitions>
 
@@ -135,7 +137,12 @@
         </DockPanel>
       </Border>
 
-      <Grid Grid.Column="1" Margin="8,0">
+      <GridSplitter Grid.Column="1"
+                    Width="5"
+                    HorizontalAlignment="Stretch"
+                    Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}" />
+
+      <Grid Grid.Column="2" Margin="8,0">
         <ListView x:Name="DetailsList"
                   ItemsSource="{Binding VisibleResults}"
                   MouseDoubleClick="ResultDoubleClicked"
@@ -202,13 +209,23 @@
         </ListBox>
       </Grid>
 
-      <Border x:Name="PreviewPane" Grid.Column="2" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}" BorderThickness="1" Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}">
+      <GridSplitter x:Name="PreviewSplitter"
+                    Grid.Column="3"
+                    Width="5"
+                    HorizontalAlignment="Stretch"
+                    Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}" />
+
+      <Border x:Name="PreviewPane" Grid.Column="4" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}" BorderThickness="1" Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}">
         <DockPanel>
-          <TextBlock Text="Preview" FontWeight="SemiBold" DockPanel.Dock="Top" Margin="8,7,8,3" />
+          <DockPanel DockPanel.Dock="Top" Margin="8,5,8,3">
+            <Button Content="Hide" DockPanel.Dock="Right" MinHeight="24" Padding="8,1" Click="HidePreviewClicked" />
+            <TextBlock x:Name="PreviewTitle" Text="Preview" FontWeight="SemiBold" VerticalAlignment="Center" />
+          </DockPanel>
           <TextBox Text="{Binding PreviewText}"
                    IsReadOnly="True"
                    TextWrapping="Wrap"
                    AcceptsReturn="True"
+                   FontFamily="Consolas"
                    VerticalScrollBarVisibility="Auto"
                    BorderThickness="0" />
         </DockPanel>
