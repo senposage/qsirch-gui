@@ -90,7 +90,11 @@
       <Button Content="Open" Click="OpenClicked" />
       <Button Content="Show" Click="ShowClicked" />
       <Button Content="☆" ToolTip="Add to Favorites" Click="FavoriteClicked" />
+      <CheckBox x:Name="AlwaysOnTopToggle" Content="Always on top" VerticalAlignment="Center" Margin="10,0,0,0" Checked="AlwaysOnTopChanged" Unchecked="AlwaysOnTopChanged" />
+      <Button x:Name="PreviewToggle" Content="Preview" Click="PreviewToggleClicked" />
       <Button Content="Settings" Click="SettingsClicked" />
+      <Button Content="Hide" Click="HideClicked" />
+      <Button Content="Exit" Click="ExitClicked" />
       <TextBlock Text="Explorer-style NAS search" VerticalAlignment="Center" Margin="10,0,0,0" Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}" />
     </DockPanel>
 

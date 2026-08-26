@@ -42,6 +42,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ViewBox.SelectedItem = ViewModes.FirstOrDefault(x => x.Key.Equals(configuredView, StringComparison.OrdinalIgnoreCase)) ?? ViewModes[^1];
         ApplyViewMode();
         ApplyBehavior();
+        AlwaysOnTopToggle.IsChecked = _config.AlwaysOnTop;
     }
 
     public ObservableCollection<SearchResult> VisibleResults { get; } = [];
@@ -198,6 +199,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void ViewChanged(object sender, SelectionChangedEventArgs e)
     {
         ApplyViewMode();
+        if (ViewBox.SelectedItem is ResultViewMode mode)
+        {
+            _config.Behavior.ResultView = mode.Key;
+            ConfigStore.Save(_config);
+        }
     }
 
     private void DetailsHeaderClicked(object sender, RoutedEventArgs e)
@@ -350,6 +356,30 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         StatusText = "Added to Favorites";
     }
 
+    private void AlwaysOnTopChanged(object sender, RoutedEventArgs e)
+    {
+        _config.AlwaysOnTop = AlwaysOnTopToggle.IsChecked == true;
+        ApplyBehavior();
+        ConfigStore.Save(_config);
+    }
+
+    private void PreviewToggleClicked(object sender, RoutedEventArgs e)
+    {
+        _config.Behavior.PreviewPane = !_config.Behavior.PreviewPane;
+        ApplyBehavior();
+        ConfigStore.Save(_config);
+    }
+
+    private void HideClicked(object sender, RoutedEventArgs e)
+    {
+        Hide();
+    }
+
+    private void ExitClicked(object sender, RoutedEventArgs e)
+    {
+        Application.Current.Shutdown();
+    }
+
     private void SettingsClicked(object sender, RoutedEventArgs e)
     {
         var dialog = new SettingsWindow(_config) { Owner = this };
@@ -364,9 +394,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _history.ClearCurrentMachine(dialog.ClearStarredRequested);
         }
         LoadFavorites();
+        ViewBox.SelectedItem = ViewModes.FirstOrDefault(x => x.Key.Equals(_config.Behavior.ResultView, StringComparison.OrdinalIgnoreCase)) ?? ViewModes[^1];
+        ApplyViewMode();
         ApplyLocalFilters();
-        Topmost = _config.AlwaysOnTop;
         ApplyBehavior();
+        AlwaysOnTopToggle.IsChecked = _config.AlwaysOnTop;
         StatusText = "Settings saved";
     }
 
@@ -482,6 +514,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         Topmost = _config.AlwaysOnTop;
         ShowInTaskbar = _config.Behavior.ShowInTaskbar;
         PreviewPane.Visibility = _config.Behavior.PreviewPane ? Visibility.Visible : Visibility.Collapsed;
+        PreviewToggle.FontWeight = _config.Behavior.PreviewPane ? FontWeights.SemiBold : FontWeights.Normal;
     }
 
     private void LoadFavorites()

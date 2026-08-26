@@ -1,6 +1,6 @@
 using System.Collections.ObjectModel;
+using System.Windows.Controls;
 using System.Windows;
-using System.Windows.Input;
 using PyQsirchgui.Windows.Models;
 
 namespace PyQsirchgui.Windows;
@@ -14,17 +14,20 @@ public partial class SettingsWindow : Window
         InitializeComponent();
         _config = config;
         Mappings = new ObservableCollection<PathMapping>(_config.PathMappings.Select(x => new PathMapping { ShareRoot = x.ShareRoot, MappedRoot = x.MappedRoot }));
-        FolderRules = new ObservableCollection<string>(_config.Exclude.Folders);
-        FileRules = new ObservableCollection<string>(_config.Exclude.Files);
+        FolderRules = new ObservableCollection<TextRule>(_config.Exclude.Folders.Select(x => new TextRule { Pattern = x }));
+        FileRules = new ObservableCollection<TextRule>(_config.Exclude.Files.Select(x => new TextRule { Pattern = x }));
+        VisibilityRules = new ObservableCollection<VisibilityRule>(_config.VisibilityRules.Select(CloneVisibilityRule));
         MappingsGrid.ItemsSource = Mappings;
-        FolderRulesList.ItemsSource = FolderRules;
-        FileRulesList.ItemsSource = FileRules;
+        FolderRulesGrid.ItemsSource = FolderRules;
+        FileRulesGrid.ItemsSource = FileRules;
+        VisibilityRulesGrid.ItemsSource = VisibilityRules;
         LoadValues();
     }
 
     public ObservableCollection<PathMapping> Mappings { get; }
-    public ObservableCollection<string> FolderRules { get; }
-    public ObservableCollection<string> FileRules { get; }
+    public ObservableCollection<TextRule> FolderRules { get; }
+    public ObservableCollection<TextRule> FileRules { get; }
+    public ObservableCollection<VisibilityRule> VisibilityRules { get; }
     public bool ClearHistoryRequested { get; private set; }
     public bool ClearStarredRequested { get; private set; }
 
@@ -37,13 +40,19 @@ public partial class SettingsWindow : Window
         SslBox.IsChecked = _config.Ssl;
         SslVerifyBox.IsChecked = _config.SslVerify;
         TaskbarBox.IsChecked = _config.Behavior.ShowInTaskbar;
+        StandardWindowBox.IsChecked = _config.Behavior.StandardWindow;
         AlwaysOnTopBox.IsChecked = _config.AlwaysOnTop;
         FoldersFirstBox.IsChecked = _config.Behavior.FoldersFirst;
+        HighlightMatchesBox.IsChecked = _config.Behavior.HighlightMatches;
         PreviewPaneBox.IsChecked = _config.Behavior.PreviewPane;
+        AllowDownloadBox.IsChecked = _config.Behavior.AllowDownload;
+        SelectTaggedItem(ThemeBox, string.IsNullOrWhiteSpace(_config.Behavior.Theme) ? "system" : _config.Behavior.Theme);
+        SelectTaggedItem(ResultViewBox, string.IsNullOrWhiteSpace(_config.Behavior.ResultView) ? "details" : _config.Behavior.ResultView);
         HotkeyBox.Text = string.IsNullOrWhiteSpace(_config.Behavior.GlobalHotkey) ? "Ctrl+Space" : _config.Behavior.GlobalHotkey;
         HistoryEnabledBox.IsChecked = _config.History.Enabled;
         HistoryFileBox.Text = _config.History.File;
         HistoryMaxBox.Text = _config.History.MaxEntries.ToString();
+        SelectTaggedItem(HistorySourceBox, string.IsNullOrWhiteSpace(_config.History.SourceFilter) ? "__this__" : _config.History.SourceFilter);
     }
 
     private void SaveClicked(object sender, RoutedEventArgs e)
@@ -59,6 +68,7 @@ public partial class SettingsWindow : Window
             return;
         }
 
+        CommitTableEdits();
         _config.Host = HostBox.Text.Trim();
         _config.Port = port;
         _config.User = UserBox.Text;
@@ -66,16 +76,31 @@ public partial class SettingsWindow : Window
         _config.Ssl = SslBox.IsChecked == true;
         _config.SslVerify = SslVerifyBox.IsChecked == true;
         _config.Behavior.ShowInTaskbar = TaskbarBox.IsChecked == true;
+        _config.Behavior.StandardWindow = StandardWindowBox.IsChecked == true;
         _config.AlwaysOnTop = AlwaysOnTopBox.IsChecked == true;
         _config.Behavior.FoldersFirst = FoldersFirstBox.IsChecked == true;
+        _config.Behavior.HighlightMatches = HighlightMatchesBox.IsChecked == true;
         _config.Behavior.PreviewPane = PreviewPaneBox.IsChecked == true;
+        _config.Behavior.AllowDownload = AllowDownloadBox.IsChecked == true;
+        _config.Behavior.Theme = SelectedTag(ThemeBox, "system");
+        _config.Behavior.ResultView = SelectedTag(ResultViewBox, "details");
         _config.Behavior.GlobalHotkey = string.IsNullOrWhiteSpace(HotkeyBox.Text) ? "Ctrl+Space" : HotkeyBox.Text.Trim();
         _config.History.Enabled = HistoryEnabledBox.IsChecked == true;
         _config.History.File = string.IsNullOrWhiteSpace(HistoryFileBox.Text) ? "history.json" : HistoryFileBox.Text.Trim();
         _config.History.MaxEntries = maxEntries;
+        _config.History.SourceFilter = SelectedTag(HistorySourceBox, "__this__");
         _config.PathMappings = Mappings.Where(x => !string.IsNullOrWhiteSpace(x.ShareRoot) && !string.IsNullOrWhiteSpace(x.MappedRoot)).ToList();
-        _config.Exclude.Folders = FolderRules.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        _config.Exclude.Files = FileRules.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        _config.Exclude.Folders = FolderRules.Select(x => x.Pattern.Trim()).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        _config.Exclude.Files = FileRules.Select(x => x.Pattern.Trim()).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        _config.VisibilityRules = VisibilityRules
+            .Where(x => !string.IsNullOrWhiteSpace(x.Pattern))
+            .Select(x => new VisibilityRule
+            {
+                Access = NormalizeAccess(x.Access),
+                Identity = string.IsNullOrWhiteSpace(x.Identity) ? "*" : x.Identity.Trim(),
+                Pattern = x.Pattern.Trim(),
+            })
+            .ToList();
         ClearHistoryRequested = ClearHistoryBox.IsChecked == true;
         ClearStarredRequested = ClearStarredBox.IsChecked == true;
         DialogResult = true;
@@ -86,25 +111,94 @@ public partial class SettingsWindow : Window
         DialogResult = false;
     }
 
-    private void FolderRuleKeyDown(object sender, KeyEventArgs e)
+    private void AddFolderRuleClicked(object sender, RoutedEventArgs e)
     {
-        if (e.Key != Key.Enter || string.IsNullOrWhiteSpace(FolderRuleBox.Text))
-        {
-            return;
-        }
-        FolderRules.Add(FolderRuleBox.Text.Trim());
-        FolderRuleBox.Clear();
-        e.Handled = true;
+        FolderRules.Add(new TextRule { Pattern = "*" });
+        FolderRulesGrid.SelectedIndex = FolderRules.Count - 1;
+        FolderRulesGrid.ScrollIntoView(FolderRulesGrid.SelectedItem);
     }
 
-    private void FileRuleKeyDown(object sender, KeyEventArgs e)
+    private void RemoveFolderRuleClicked(object sender, RoutedEventArgs e)
     {
-        if (e.Key != Key.Enter || string.IsNullOrWhiteSpace(FileRuleBox.Text))
-        {
-            return;
-        }
-        FileRules.Add(FileRuleBox.Text.Trim());
-        FileRuleBox.Clear();
-        e.Handled = true;
+        RemoveSelected(FolderRulesGrid, FolderRules);
     }
+
+    private void AddFileRuleClicked(object sender, RoutedEventArgs e)
+    {
+        FileRules.Add(new TextRule { Pattern = "*" });
+        FileRulesGrid.SelectedIndex = FileRules.Count - 1;
+        FileRulesGrid.ScrollIntoView(FileRulesGrid.SelectedItem);
+    }
+
+    private void RemoveFileRuleClicked(object sender, RoutedEventArgs e)
+    {
+        RemoveSelected(FileRulesGrid, FileRules);
+    }
+
+    private void AddVisibilityRuleClicked(object sender, RoutedEventArgs e)
+    {
+        VisibilityRules.Add(new VisibilityRule { Access = "deny", Identity = "*", Pattern = "*" });
+        VisibilityRulesGrid.SelectedIndex = VisibilityRules.Count - 1;
+        VisibilityRulesGrid.ScrollIntoView(VisibilityRulesGrid.SelectedItem);
+    }
+
+    private void RemoveVisibilityRuleClicked(object sender, RoutedEventArgs e)
+    {
+        RemoveSelected(VisibilityRulesGrid, VisibilityRules);
+    }
+
+    private void CommitTableEdits()
+    {
+        foreach (var grid in new[] { MappingsGrid, FolderRulesGrid, FileRulesGrid, VisibilityRulesGrid })
+        {
+            grid.CommitEdit(DataGridEditingUnit.Cell, true);
+            grid.CommitEdit(DataGridEditingUnit.Row, true);
+        }
+    }
+
+    private static void RemoveSelected<T>(DataGrid grid, ObservableCollection<T> items)
+    {
+        if (grid.SelectedItem is T item)
+        {
+            items.Remove(item);
+        }
+    }
+
+    private static VisibilityRule CloneVisibilityRule(VisibilityRule rule)
+    {
+        return new VisibilityRule
+        {
+            Access = NormalizeAccess(rule.Access),
+            Identity = string.IsNullOrWhiteSpace(rule.Identity) ? "*" : rule.Identity,
+            Pattern = rule.Pattern,
+        };
+    }
+
+    private static string NormalizeAccess(string access)
+    {
+        return access.Equals("allow", StringComparison.OrdinalIgnoreCase) ? "allow" : "deny";
+    }
+
+    private static void SelectTaggedItem(ComboBox box, string tag)
+    {
+        foreach (var item in box.Items.OfType<ComboBoxItem>())
+        {
+            if ((item.Tag?.ToString() ?? "").Equals(tag, StringComparison.OrdinalIgnoreCase))
+            {
+                box.SelectedItem = item;
+                return;
+            }
+        }
+        box.SelectedIndex = 0;
+    }
+
+    private static string SelectedTag(ComboBox box, string fallback)
+    {
+        return (box.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? fallback;
+    }
+}
+
+public sealed class TextRule
+{
+    public string Pattern { get; set; } = "";
 }
