@@ -1,7 +1,7 @@
 from pathlib import Path
 s = Path("qsirch_gui.py").read_text(encoding="utf-8")
 required = [
-    'APP_VERSION = "v10.18"',
+    'APP_VERSION = "v10.19"',
     'COMPACT_HEIGHT = 132',
     'self.hint=QLabel(',
     'hasattr(self, "hint")',
@@ -50,6 +50,9 @@ required = [
     'def build_preview_data(self, preview_item, request_id):',
     'QPixmap(image_path)',
     'TEXT_PREVIEW_EXTS',
+    'FILE_TYPE_FILTERS',
+    '("PowerPoint", "All",',
+    'opts["exts"]',
     'MAX_TEXT_PREVIEW_BYTES',
     '#cardStandard',
     '"source_filter": "__this__"',
@@ -63,6 +66,17 @@ required = [
     'self.preview_visible = False',
     'self.preview_workers.append(worker)',
     '"preview_pane": False',
+    '"result_view": "details"',
+    'self.view_mode=QComboBox()',
+    'def configure_result_list_for_view(self):',
+    'QListWidget.IconMode',
+    'def add_icon_result_item(self, item, history_entry=None):',
+    'def quick_filter_changed(self):',
+    'self.category_filter=QComboBox()',
+    'self.favorite_list = QListWidget()',
+    'self.favorite_list.itemClicked.connect(self.open_item)',
+    'def has_favorites_to_show(self):',
+    'fav=m.addAction',
     'display_path',
     'QSystemTrayIcon',
     'setSizeHint',
@@ -70,4 +84,4 @@ required = [
 missing = [x for x in required if x not in s]
 if missing:
     raise SystemExit("Missing required v10 source markers: " + repr(missing))
-print("v10.18 source verification passed.")
+print("v10.19 source verification passed.")

@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "Qsirch Floating Search"
-APP_VERSION = "v10.18"
+APP_VERSION = "v10.19"
 COMPACT_HEIGHT = 132
 UPSTREAM_REPO = "https://github.com/iios-co/qsirch"
 FORK_REPO = "https://github.com/senposage/qsirch-gui"
@@ -31,6 +31,21 @@ TEXT_PREVIEW_EXTS = {
 }
 IMAGE_PREVIEW_EXTS = {"jpg", "jpeg", "png", "gif", "bmp", "webp", "tif", "tiff"}
 MAX_TEXT_PREVIEW_BYTES = 512 * 1024
+FILE_TYPE_FILTERS = [
+    ("All types", "All", ()),
+    ("Word", "All", ("doc", "docx", "docm", "dot", "dotx", "rtf")),
+    ("Excel", "All", ("xls", "xlsx", "xlsm", "xlsb", "csv")),
+    ("PowerPoint", "All", ("ppt", "pptx", "pptm", "pps", "ppsx")),
+    ("PDF", "All", ("pdf",)),
+    ("OneNote", "All", ("one",)),
+    ("Email", "Email", ("eml", "msg")),
+    ("Text", "All", ("txt", "md", "log", "ini", "cfg")),
+    ("Images", "All", ("jpg", "jpeg", "png", "gif", "bmp", "webp", "tif", "tiff")),
+    ("Videos", "All", ("mp4", "mov", "mkv", "avi", "wmv", "m4v")),
+    ("Music", "All", ("mp3", "wav", "flac", "m4a", "aac", "wma")),
+    ("Archives", "All", ("zip", "7z", "rar", "tar", "gz")),
+    ("Code", "All", ("py", "js", "ts", "html", "css", "sql", "ps1", "bat", "cmd")),
+]
 
 WM_HOTKEY = 0x0312
 HOTKEY_ID = 0x5153
@@ -306,6 +321,9 @@ def behavior_defaults(cfg):
     theme = str(raw.get("theme", "system") or "system").lower()
     if theme not in ("system", "light", "dark"):
         theme = "system"
+    result_view = str(raw.get("result_view", raw.get("resultView", "details")) or "details").lower()
+    if result_view not in ("details", "content", "small_icons", "large_icons"):
+        result_view = "details"
     return {
         "show_in_taskbar": bool(raw.get("show_in_taskbar", raw.get("showInTaskbar", True))),
         "global_hotkey": str(raw.get("global_hotkey", raw.get("globalHotkey", "Ctrl+Space")) or "Ctrl+Space"),
@@ -315,6 +333,7 @@ def behavior_defaults(cfg):
         "standard_window": bool(raw.get("standard_window", raw.get("standardWindow", True))),
         "allow_download": bool(raw.get("allow_download", raw.get("allowDownload", False))),
         "folders_first": bool(raw.get("folders_first", raw.get("foldersFirst", True))),
+        "result_view": result_view,
     }
 
 def windows_prefers_dark():
@@ -511,6 +530,7 @@ def item_modified_text(item):
 
 def client_filter_items(items, opts, from_date="", to_date=""):
     ext_filter = str(opts.get("ext", "") or "").lower().lstrip(".")
+    ext_filters = [str(x).lower().lstrip(".") for x in opts.get("exts", []) if x]
     path_filter = str(opts.get("path", "") or "").casefold()
     regex_text = str(opts.get("regex", "") or "")
     exclude_terms = [str(x).casefold() for x in opts.get("exclude", []) if x]
@@ -527,6 +547,8 @@ def client_filter_items(items, opts, from_date="", to_date=""):
         ext = str(item.get("extension", "") or "").lower().lstrip(".")
         haystack = " ".join([name, ext, full_path, str(item.get("content", "") or "")])
         if ext_filter and ext != ext_filter:
+            continue
+        if ext_filters and ext not in ext_filters:
             continue
         if path_filter and path_filter not in full_path.casefold():
             continue
@@ -1086,6 +1108,16 @@ class Settings(QDialog):
         self.highlight_matches.setChecked(bcfg["highlight_matches"])
         self.preview_pane = QCheckBox("Show preview pane")
         self.preview_pane.setChecked(bcfg["preview_pane"])
+        self.result_view_choice = QComboBox()
+        for label, value in (
+            ("Details", "details"),
+            ("Content", "content"),
+            ("Small icons", "small_icons"),
+            ("Large icons", "large_icons"),
+        ):
+            self.result_view_choice.addItem(label, value)
+        view_idx = self.result_view_choice.findData(bcfg["result_view"])
+        self.result_view_choice.setCurrentIndex(view_idx if view_idx >= 0 else 0)
         self.folders_first = QCheckBox("Show folders before files")
         self.folders_first.setChecked(bcfg["folders_first"])
         self.allow_download = QCheckBox("Show Download button")
@@ -1102,6 +1134,7 @@ class Settings(QDialog):
         bf.addRow("Theme", self.theme_choice)
         bf.addRow("", self.highlight_matches)
         bf.addRow("", self.preview_pane)
+        bf.addRow("Result view", self.result_view_choice)
         bf.addRow("", self.folders_first)
         bf.addRow("", self.allow_download)
         bf.addRow("Hide / unhide shortcut", self.hotkey_edit)
@@ -1540,6 +1573,7 @@ class Settings(QDialog):
                 "theme": self.theme_choice.currentData() or "system",
                 "highlight_matches": self.highlight_matches.isChecked(),
                 "preview_pane": self.preview_pane.isChecked(),
+                "result_view": self.result_view_choice.currentData() or "details",
                 "standard_window": self.standard_window.isChecked(),
                 "allow_download": self.allow_download.isChecked(),
                 "folders_first": self.folders_first.isChecked(),
@@ -1570,6 +1604,10 @@ class Main(QWidget):
         self.preview_request_id = 0
         self.preview_pixmap = None
         self.results = []
+        self.all_results = []
+        self.last_server_total = 0
+        self.last_hidden = 0
+        self.last_status_text = "Ready"
         self.history = HistoryStore(self.cfg)
         self.exiting = False
         self.refreshing_history = False
@@ -1630,7 +1668,7 @@ class Main(QWidget):
                 },
                 "visibility_rules": [],
                 "history": {"enabled": True, "file": "history.json", "max_entries": 200, "source_filter": "__this__"},
-                "behavior": {"show_in_taskbar": True, "global_hotkey": "Ctrl+Space", "theme": "system", "highlight_matches": True, "preview_pane": False, "standard_window": True, "allow_download": False, "folders_first": True},
+                "behavior": {"show_in_taskbar": True, "global_hotkey": "Ctrl+Space", "theme": "system", "highlight_matches": True, "preview_pane": False, "standard_window": True, "allow_download": False, "folders_first": True, "result_view": "details"},
                 "always_on_top": True
             }
 
@@ -1648,11 +1686,34 @@ class Main(QWidget):
         top.setSpacing(8)
         self.search=QLineEdit(); self.search.setPlaceholderText("Search Qsirch")
         self.search.setMinimumHeight(40)
+        self.search.setMinimumWidth(220)
         self.search.setClearButtonEnabled(False)
         self.search.returnPressed.connect(self.do_search)
         self.search.textChanged.connect(self.query_changed)
         self.search.textChanged.connect(lambda _: self.clear_btn.setEnabled(bool(self.search.text())))
         top.addWidget(self.search,1)
+
+        self.category_filter=QComboBox()
+        self.category_filter.setObjectName("compactCombo")
+        self.category_filter.setToolTip("Filter by result type")
+        for label, category, extensions in FILE_TYPE_FILTERS:
+            self.category_filter.addItem(label, {"category": category, "extensions": extensions})
+        self.category_filter.setMinimumHeight(36)
+        self.category_filter.setFixedWidth(132)
+        self.category_filter.currentIndexChanged.connect(self.quick_filter_changed)
+        top.addWidget(self.category_filter)
+
+        self.view_mode=QComboBox()
+        self.view_mode.setObjectName("compactCombo")
+        self.view_mode.setToolTip("Change result view")
+        for label, value in (("Details", "details"), ("Content", "content"), ("Small icons", "small_icons"), ("Large icons", "large_icons")):
+            self.view_mode.addItem(label, value)
+        view_idx = self.view_mode.findData(behavior_defaults(self.cfg)["result_view"])
+        self.view_mode.setCurrentIndex(view_idx if view_idx >= 0 else 0)
+        self.view_mode.setMinimumHeight(36)
+        self.view_mode.setFixedWidth(112)
+        self.view_mode.currentIndexChanged.connect(self.result_view_changed)
+        top.addWidget(self.view_mode)
 
         self.help_btn=QPushButton("?")
         self.help_btn.setObjectName("toolButton")
@@ -1670,12 +1731,15 @@ class Main(QWidget):
         self.clear_btn.setEnabled(False)
         self.clear_btn.clicked.connect(self.clear_search)
         top.addWidget(self.clear_btn)
+        v.addLayout(top)
 
         self.version_label = QLabel(APP_VERSION)
         self.version_label.setObjectName("versionBadge")
         self.version_label.setToolTip("Running build version")
         self.version_label.installEventFilter(self)
 
+        commands=QHBoxLayout()
+        commands.setSpacing(8)
         self.pin_btn=QPushButton("Always on top")
         self.pin_btn.setObjectName("pinButton")
         self.pin_btn.setToolTip("Keep the search window always on top")
@@ -1684,7 +1748,7 @@ class Main(QWidget):
         self.pin_btn.setFixedWidth(112)
         self.pin_btn.setMinimumHeight(36)
         self.pin_btn.clicked.connect(self.toggle_pin)
-        top.addWidget(self.pin_btn)
+        commands.addWidget(self.pin_btn)
         self.update_pin_button()
 
         self.filters_btn=QPushButton("Filters")
@@ -1695,7 +1759,7 @@ class Main(QWidget):
         self.filters_btn.setFixedWidth(68)
         self.filters_btn.setMinimumHeight(36)
         self.filters_btn.clicked.connect(self.toggle_filters)
-        top.addWidget(self.filters_btn)
+        commands.addWidget(self.filters_btn)
 
         self.preview_btn=QPushButton("Preview")
         self.preview_btn.setObjectName("toolButton")
@@ -1705,7 +1769,7 @@ class Main(QWidget):
         self.preview_btn.setFixedWidth(74)
         self.preview_btn.setMinimumHeight(36)
         self.preview_btn.clicked.connect(self.toggle_preview_pane)
-        top.addWidget(self.preview_btn)
+        commands.addWidget(self.preview_btn)
 
         self.gear=QPushButton("Settings")
         self.gear.setObjectName("toolButton")
@@ -1713,7 +1777,7 @@ class Main(QWidget):
         self.gear.setFixedWidth(78)
         self.gear.setMinimumHeight(36)
         self.gear.clicked.connect(self.settings)
-        top.addWidget(self.gear)
+        commands.addWidget(self.gear)
 
         self.hide_btn=QPushButton("Hide")
         self.hide_btn.setObjectName("toolButton")
@@ -1721,7 +1785,7 @@ class Main(QWidget):
         self.hide_btn.setFixedWidth(56)
         self.hide_btn.setMinimumHeight(36)
         self.hide_btn.clicked.connect(self.hide)
-        top.addWidget(self.hide_btn)
+        commands.addWidget(self.hide_btn)
 
         self.exit_btn=QPushButton("Exit")
         self.exit_btn.setObjectName("exitButton")
@@ -1729,8 +1793,9 @@ class Main(QWidget):
         self.exit_btn.setFixedWidth(52)
         self.exit_btn.setMinimumHeight(36)
         self.exit_btn.clicked.connect(self.quit_app)
-        top.addWidget(self.exit_btn)
-        v.addLayout(top)
+        commands.addWidget(self.exit_btn)
+        commands.addStretch()
+        v.addLayout(commands)
 
         self.filters_widget = QWidget()
         filters=QHBoxLayout(self.filters_widget)
@@ -1751,11 +1816,6 @@ class Main(QWidget):
         self.path_filter.setFixedWidth(120)
         self.path_filter.returnPressed.connect(self.do_search)
         filters.addWidget(self.path_filter)
-        self.category_filter=QComboBox()
-        self.category_filter.setToolTip("Qsirch category filter")
-        for label, value in (("All", "All"), ("Email", "Email"), ("PDF", "PDF"), ("Documents", "Documents"), ("Images", "Images"), ("Videos", "Videos"), ("Music", "Music"), ("Excel", "Excel"), ("Word", "Word")):
-            self.category_filter.addItem(label, value)
-        filters.addWidget(self.category_filter)
         self.mode_filter=QComboBox()
         self.mode_filter.setToolTip("Search mode")
         self.mode_filter.addItem("Text", 0)
@@ -1856,9 +1916,13 @@ class Main(QWidget):
         self.favorite_title.setObjectName("folderPath")
         self.favorite_count = QLabel("")
         self.favorite_count.setObjectName("fileName")
+        self.favorite_list = QListWidget()
+        self.favorite_list.setObjectName("favoriteList")
+        self.favorite_list.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.favorite_list.itemClicked.connect(self.open_item)
         self.sidebar_layout.addWidget(self.favorite_title)
         self.sidebar_layout.addWidget(self.favorite_count)
-        self.sidebar_layout.addStretch()
+        self.sidebar_layout.addWidget(self.favorite_list, 1)
         settings_button = QPushButton("Settings")
         settings_button.setObjectName("navButton")
         settings_button.clicked.connect(self.settings)
@@ -1993,8 +2057,21 @@ class Main(QWidget):
     def refresh_favorites_panel(self):
         if not hasattr(self, "favorite_count"):
             return
-        count = len(self.history.filtered("__favorites__"))
+        favorites = self.history.filtered("__favorites__")
+        count = len(favorites)
         self.favorite_count.setText(f"{count:,} saved" if count else "No favorites")
+        if hasattr(self, "favorite_list"):
+            self.favorite_list.clear()
+            for entry in favorites:
+                item = entry.get("item") if isinstance(entry.get("item"), dict) else entry
+                if self.is_visibility_hidden(item):
+                    continue
+                title = self.result_title_text(item) if hasattr(self, "list") else entry.get("name", "Favorite")
+                li = QListWidgetItem(self.result_icon(item), title)
+                li.setData(Qt.UserRole, {"_history": True, "item": item})
+                path = entry.get("path") or QsirchClient.path(item)
+                li.setToolTip(display_path(path) if path else title)
+                self.favorite_list.addItem(li)
 
     def set_preview_visible(self, visible, persist=True):
         self.preview_visible = bool(visible)
@@ -2329,6 +2406,9 @@ class Main(QWidget):
     def has_history_to_show(self):
         return bool(getattr(self, "history", None) and self.history.filtered(self.current_history_filter()))
 
+    def has_favorites_to_show(self):
+        return bool(getattr(self, "history", None) and self.history.filtered("__favorites__"))
+
     def current_history_filter(self):
         return getattr(self, "history_view", history_defaults(self.cfg)["source_filter"]) or "__this__"
 
@@ -2355,6 +2435,81 @@ class Main(QWidget):
         best = max(specificity for specificity, _ in matches)
         best_actions = [access for specificity, access in matches if specificity == best]
         return "allow" not in best_actions
+
+    def current_result_view(self):
+        if hasattr(self, "view_mode"):
+            return self.view_mode.currentData() or "details"
+        return behavior_defaults(self.cfg)["result_view"]
+
+    def result_view_changed(self):
+        self.cfg.setdefault("behavior", {})["result_view"] = self.current_result_view()
+        self.save()
+        if self.search.text().strip():
+            self.render_results(self.last_server_total or len(self.results), self.last_hidden, self.last_status_text)
+        else:
+            self.refresh_history_view()
+
+    def quick_filter_changed(self):
+        if self.search.text().strip() and self.all_results:
+            opts = self.current_search_options()
+            visible = [
+                item for item in self.all_results
+                if not self.is_visibility_hidden(item)
+            ]
+            visible = client_filter_items(visible, opts, opts["from_date"], opts["to_date"])
+            self.results = self.sort_results(visible, opts)
+            self.render_results(self.last_server_total or len(self.results), self.last_hidden, self.last_status_text)
+        elif self.search.text().strip():
+            self.do_search()
+        else:
+            self.refresh_history_view()
+
+    def configure_result_list_for_view(self):
+        mode = self.current_result_view()
+        icon_mode = mode in ("small_icons", "large_icons")
+        self.list.setViewMode(QListWidget.IconMode if icon_mode else QListWidget.ListMode)
+        self.list.setMovement(QListWidget.Static)
+        self.list.setResizeMode(QListWidget.Adjust)
+        self.list.setWrapping(icon_mode)
+        self.list.setWordWrap(True)
+        self.list.setUniformItemSizes(icon_mode)
+        self.list.setSpacing(8 if icon_mode else 0)
+        if mode == "large_icons":
+            self.list.setIconSize(QSize(72, 72))
+            self.list.setGridSize(QSize(172, 142))
+        elif mode == "small_icons":
+            self.list.setIconSize(QSize(28, 28))
+            self.list.setGridSize(QSize(208, 58))
+        else:
+            self.list.setIconSize(QSize(22, 22))
+            self.list.setGridSize(QSize())
+
+    def result_icon(self, item):
+        path = QsirchClient.path(item)
+        ext = str(item.get("extension", "") or "").lower()
+        if not ext and "." in str(path or ""):
+            ext = str(path).rsplit(".", 1)[-1].lower()
+        if not ext:
+            return self.style().standardIcon(QStyle.SP_DirIcon)
+        return self.style().standardIcon(QStyle.SP_FileIcon)
+
+    def result_title_text(self, item):
+        path = QsirchClient.path(item)
+        folder, file_name = result_display_parts(item, path)
+        return str(file_name or display_folder_path(folder) or item.get("name", "") or "Result")
+
+    def add_icon_result_item(self, item, history_entry=None):
+        title = self.result_title_text(item)
+        path = QsirchClient.path(item)
+        li = QListWidgetItem(self.result_icon(item), title)
+        li.setData(Qt.UserRole, {"_history": True, "item": item} if history_entry is not None else item)
+        li.setToolTip(display_path(path) if path else title)
+        li.setTextAlignment(Qt.AlignHCenter | Qt.AlignTop)
+        if self.current_result_view() == "large_icons":
+            li.setSizeHint(QSize(172, 142))
+        else:
+            li.setSizeHint(QSize(208, 58))
+        self.list.addItem(li)
 
     def add_sized_row(self, item, row, minimum_height=58):
         def select_row(event, list_item=item):
@@ -2388,8 +2543,13 @@ class Main(QWidget):
                     entries.append(entry)
             starred_keys = self.history.starred_keys()
             self.list.clear()
+            self.configure_result_list_for_view()
+            view = self.current_result_view()
             for entry in entries:
                 item = entry.get("item") if isinstance(entry.get("item"), dict) else entry
+                if view in ("small_icons", "large_icons"):
+                    self.add_icon_result_item(item, entry)
+                    continue
                 name = entry.get("name") or item.get("name", "")
                 ext = entry.get("extension") or item.get("extension", "")
                 if ext and name and not str(name).lower().endswith("." + str(ext).lower()):
@@ -2402,9 +2562,9 @@ class Main(QWidget):
                 meta_parts = [x for x in (machine, ip, used) if x]
                 starred = result_key(item) in starred_keys
                 meta = str(file_name or name or "Saved result")
-                if meta_parts:
+                if view == "content" and meta_parts:
                     meta += "\n" + "  |  ".join(meta_parts)
-                if path:
+                if path and view == "content":
                     meta += "\n" + display_path(path)
                 li = QListWidgetItem()
                 li.setData(Qt.UserRole, {"_history": True, "item": item})
@@ -2442,7 +2602,7 @@ class Main(QWidget):
                     rh.addWidget(downb)
                 rh.addWidget(openb)
                 rh.addWidget(explorerb)
-                self.add_sized_row(li, row, 76)
+                self.add_sized_row(li, row, 82 if view == "content" else 58)
             if entries:
                 self.status.setText("Saved results")
                 self.count.setText(f"{len(entries):,} saved")
@@ -2456,9 +2616,9 @@ class Main(QWidget):
                     self.clear_preview()
         finally:
             self.refreshing_history = False
-        compact = not entries
+        compact = not entries and not self.has_favorites_to_show()
         self.status_bar_widget.setVisible(not compact)
-        self.list.setVisible(not compact)
+        self.list.setVisible(bool(entries))
         if hasattr(self, "content_splitter"):
             self.content_splitter.setVisible(not compact)
         self.hint.setVisible(not compact)
@@ -2473,12 +2633,15 @@ class Main(QWidget):
         empty = not self.search.text().strip() if hasattr(self, "search") else True
         if empty and not getattr(self, "refreshing_history", False):
             self.refresh_history_view()
-        compact = (empty and not self.has_history_to_show()) or (not empty and not self.has_visible_content)
+        compact = (
+            (empty and not self.has_history_to_show() and not self.has_favorites_to_show())
+            or (not empty and not self.has_visible_content)
+        )
 
         if hasattr(self, "status_bar_widget"):
             self.status_bar_widget.setVisible(not compact)
         if hasattr(self, "list"):
-            self.list.setVisible(not compact)
+            self.list.setVisible(not compact and (not empty or self.has_history_to_show()))
         if hasattr(self, "content_splitter"):
             self.content_splitter.setVisible(not compact)
         if hasattr(self, "hint"):
@@ -2498,6 +2661,7 @@ class Main(QWidget):
     def query_changed(self):
         if self.search.text().strip():
             self.has_visible_content = False
+            self.all_results = []
             self.list.clear()
             self.count.clear()
             self.status.setText("Ready")
@@ -2527,8 +2691,16 @@ class Main(QWidget):
             if clear_history:
                 self.history.clear_current_machine(clear_starred)
             self.history.load()
+            if hasattr(self, "view_mode"):
+                idx = self.view_mode.findData(behavior_defaults(self.cfg)["result_view"])
+                if idx >= 0:
+                    self.view_mode.blockSignals(True)
+                    self.view_mode.setCurrentIndex(idx)
+                    self.view_mode.blockSignals(False)
             self.refresh_favorites_panel()
             self.refresh_history_view()
+            if self.search.text().strip() and self.results:
+                self.render_results(self.last_server_total or len(self.results), self.last_hidden, self.last_status_text)
             if self.hotkey_warning:
                 QMessageBox.warning(self, "Shortcut unavailable", self.hotkey_warning)
             else:
@@ -2600,7 +2772,13 @@ class Main(QWidget):
             opts["ext"] = self.ext_filter.text().strip().lstrip(".")
         if self.path_filter.text().strip():
             opts["path"] = self.path_filter.text().strip()
-        opts["category"] = self.category_filter.currentData() or "All"
+        type_data = self.category_filter.currentData() or {}
+        if isinstance(type_data, dict):
+            opts["category"] = type_data.get("category") or "All"
+            opts["exts"] = list(type_data.get("extensions") or [])
+        else:
+            opts["category"] = str(type_data or "All")
+            opts["exts"] = []
         opts["mode"] = int(self.mode_filter.currentData() or 0)
         opts["sort_by"] = self.sort_filter.currentData() or "relevance"
         opts["sort_dir"] = self.sort_dir.currentData() or "desc"
@@ -2615,12 +2793,13 @@ class Main(QWidget):
             self.update_compact_state()
             return
         opts = self.current_search_options()
-        cached = [
+        cached_matches = [
             item for item in self.history.search_results(raw_q, self.current_history_filter())
             if not self.is_visibility_hidden(item)
         ]
-        cached = client_filter_items(cached, opts, opts["from_date"], opts["to_date"])
+        cached = client_filter_items(cached_matches, opts, opts["from_date"], opts["to_date"])
         if cached:
+            self.all_results = list(cached_matches)
             self.results = self.sort_results(cached, opts)
             self.render_results(len(cached), 0, "Saved results")
             return
@@ -2649,10 +2828,18 @@ class Main(QWidget):
 
     def render_results(self, server_total, hidden=0, status_text="Ready"):
         self.list.clear()
+        self.last_server_total = server_total
+        self.last_hidden = hidden
+        self.last_status_text = status_text
+        self.configure_result_list_for_view()
         query = self.search.text().strip()
         do_highlight = behavior_defaults(self.cfg)["highlight_matches"]
         starred_keys = self.history.starred_keys()
+        view = self.current_result_view()
         for item in self.results:
+            if view in ("small_icons", "large_icons"):
+                self.add_icon_result_item(item)
+                continue
             path=QsirchClient.path(item)
             folder, file_name = result_display_parts(item, path)
             size=item.get("size",0)
@@ -2677,7 +2864,7 @@ class Main(QWidget):
             detail_text = str(file_name)
             if size:
                 detail_text += f"\n{size}"
-            if path:
+            if path and view == "content":
                 detail_text += f"\n{display_path(path)}"
             detail=QLabel()
             detail.setObjectName("fileName")
@@ -2703,7 +2890,7 @@ class Main(QWidget):
                 rh.addWidget(downb)
             rh.addWidget(openb)
             rh.addWidget(explorerb)
-            self.add_sized_row(li, row, 76)
+            self.add_sized_row(li, row, 82 if view == "content" else 58)
         if hidden:
             self.count.setText(f"{len(self.results):,} shown  •  {hidden:,} excluded  •  {server_total:,} total")
         else:
@@ -2724,6 +2911,7 @@ class Main(QWidget):
         data = data.get("data", {}) if isinstance(data, dict) and "data" in data else data
         raw_items=data.get("items",[])
         indexed_items=[item for item in raw_items if not self.is_excluded(item)]
+        self.all_results = list(indexed_items)
         visible_items=[item for item in indexed_items if not self.is_visibility_hidden(item)]
         visible_items = client_filter_items(visible_items, opts, opts.get("from_date", ""), opts.get("to_date", ""))
         self.results=self.sort_results(visible_items, opts)
@@ -2898,16 +3086,20 @@ class Main(QWidget):
         m=QMenu(self)
         op=m.addAction("Open")
         ex=m.addAction("Show in Explorer")
+        obj=item.data(Qt.UserRole)
+        source_obj = obj.get("item", obj) if isinstance(obj, dict) and obj.get("_history") else obj
+        fav=m.addAction("Remove from Favorites" if self.history.is_starred(source_obj) else "Add to Favorites")
         sim=m.addAction("More Like This")
         dl=None
         if behavior_defaults(self.cfg)["allow_download"]:
             dl=m.addAction("Download")
         a=m.exec(self.list.mapToGlobal(pos))
-        obj=item.data(Qt.UserRole)
         if a==op:
             self.open_item(obj)
         elif a==ex:
             self.explorer_item(obj)
+        elif a==fav:
+            self.toggle_star(source_obj)
         elif a==sim:
             self.list.setCurrentItem(item)
             self.more_like_this()

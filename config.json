@@ -21,7 +21,8 @@
     "preview_pane": false,
     "standard_window": true,
     "allow_download": false,
-    "folders_first": true
+    "folders_first": true,
+    "result_view": "details"
   },
   "always_on_top": true,
   "exclude": {
