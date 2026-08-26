@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "Qsirch Floating Search"
-APP_VERSION = "v10.11"
+APP_VERSION = "v10.12"
 COMPACT_HEIGHT = 132
 UPSTREAM_REPO = "https://github.com/iios-co/qsirch"
 FORK_REPO = "https://github.com/senposage/qsirch-gui"
@@ -1446,19 +1446,11 @@ class Main(QWidget):
                 "path_mappings": [],
                 "exclude": {
                     "folders": [
-                        "@Recently-Snapshot",
                         "@Recently-Snapshot\\*",
-                        "@Recycle",
                         "@Recycle\\*",
-                        "@recycle",
-                        "@recycle\\*",
-                        "#recycle",
                         "#recycle\\*",
-                        ".sync",
                         ".sync\\*",
-                        ".qsync",
                         ".qsync\\*",
-                        ".qsync_sn",
                         ".qsync_sn\\*"
                     ],
                     "files": [

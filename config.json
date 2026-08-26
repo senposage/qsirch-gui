@@ -22,19 +22,11 @@
   "always_on_top": true,
   "exclude": {
     "folders": [
-      "@Recently-Snapshot",
       "@Recently-Snapshot\\*",
-      "@Recycle",
       "@Recycle\\*",
-      "@recycle",
-      "@recycle\\*",
-      "#recycle",
       "#recycle\\*",
-      ".sync",
       ".sync\\*",
-      ".qsync",
       ".qsync\\*",
-      ".qsync_sn",
       ".qsync_sn\\*"
     ],
     "files": [
