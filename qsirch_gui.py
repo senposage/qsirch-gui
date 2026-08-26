@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "Qsirch Floating Search"
-APP_VERSION = "v10.15"
+APP_VERSION = "v10.16"
 COMPACT_HEIGHT = 132
 UPSTREAM_REPO = "https://github.com/iios-co/qsirch"
 FORK_REPO = "https://github.com/senposage/qsirch-gui"
@@ -305,7 +305,7 @@ def behavior_defaults(cfg):
         "theme": theme,
         "highlight_matches": bool(raw.get("highlight_matches", raw.get("highlightMatches", True))),
         "preview_pane": bool(raw.get("preview_pane", raw.get("previewPane", False))),
-        "standard_window": bool(raw.get("standard_window", raw.get("standardWindow", False))),
+        "standard_window": bool(raw.get("standard_window", raw.get("standardWindow", True))),
         "allow_download": bool(raw.get("allow_download", raw.get("allowDownload", False))),
         "folders_first": bool(raw.get("folders_first", raw.get("foldersFirst", True))),
     }
@@ -1554,6 +1554,7 @@ class Main(QWidget):
         self.preview_worker = None
         self.preview_workers = []
         self.preview_request_id = 0
+        self.preview_pixmap = None
         self.results = []
         self.history = HistoryStore(self.cfg)
         self.exiting = False
@@ -1567,7 +1568,6 @@ class Main(QWidget):
         self.preview_visible = False
         self.filters_visible = False
         self.history_view = history_defaults(self.cfg)["source_filter"]
-        self.nav_buttons = []
         self.hotkey_manager = HotkeyManager(self)
         self.hotkey_warning = ""
         self.apply_window_flags()
@@ -1616,7 +1616,7 @@ class Main(QWidget):
                 },
                 "visibility_rules": [],
                 "history": {"enabled": True, "file": "history.json", "max_entries": 200, "source_filter": "__this__"},
-                "behavior": {"show_in_taskbar": True, "global_hotkey": "Ctrl+Space", "theme": "system", "highlight_matches": True, "preview_pane": False, "standard_window": False, "allow_download": False, "folders_first": True},
+                "behavior": {"show_in_taskbar": True, "global_hotkey": "Ctrl+Space", "theme": "system", "highlight_matches": True, "preview_pane": False, "standard_window": True, "allow_download": False, "folders_first": True},
                 "always_on_top": True
             }
 
@@ -1814,35 +1814,42 @@ class Main(QWidget):
         self.preview_title = QLabel("Preview")
         self.preview_title.setObjectName("folderPath")
         self.preview_title.setWordWrap(True)
-        pop_preview = QPushButton("Pop Out")
-        pop_preview.setFixedWidth(76)
-        pop_preview.clicked.connect(self.popout_preview)
         close_preview = QPushButton("Hide")
         close_preview.setFixedWidth(56)
         close_preview.clicked.connect(lambda: self.set_preview_visible(False))
         ph.addWidget(self.preview_title, 1)
-        ph.addWidget(pop_preview)
         ph.addWidget(close_preview)
         pp.addLayout(ph)
         self.preview_image = QLabel("")
         self.preview_image.setObjectName("previewImage")
         self.preview_image.setAlignment(Qt.AlignCenter)
-        self.preview_image.setMinimumSize(220, 150)
+        self.preview_image.setMinimumSize(220, 220)
         self.preview_image.setScaledContents(False)
-        pp.addWidget(self.preview_image)
+        pp.addWidget(self.preview_image, 2)
         self.preview_text = QTextEdit()
         self.preview_text.setObjectName("previewText")
         self.preview_text.setReadOnly(True)
         self.preview_text.setLineWrapMode(QTextEdit.WidgetWidth)
         self.preview_text.setPlainText("Select a result to preview.")
-        pp.addWidget(self.preview_text, 1)
+        pp.addWidget(self.preview_text, 3)
 
         self.sidebar = QFrame()
         self.sidebar.setObjectName("sidebar")
         self.sidebar_layout = QVBoxLayout(self.sidebar)
         self.sidebar_layout.setContentsMargins(8, 8, 8, 8)
-        self.sidebar_layout.setSpacing(4)
-        self.refresh_sidebar()
+        self.sidebar_layout.setSpacing(6)
+        self.favorite_title = QLabel("Favorites")
+        self.favorite_title.setObjectName("folderPath")
+        self.favorite_count = QLabel("")
+        self.favorite_count.setObjectName("fileName")
+        self.sidebar_layout.addWidget(self.favorite_title)
+        self.sidebar_layout.addWidget(self.favorite_count)
+        self.sidebar_layout.addStretch()
+        settings_button = QPushButton("Settings")
+        settings_button.setObjectName("navButton")
+        settings_button.clicked.connect(self.settings)
+        self.sidebar_layout.addWidget(settings_button)
+        self.refresh_favorites_panel()
 
         self.results_splitter = QSplitter(Qt.Horizontal)
         self.results_splitter.addWidget(self.list)
@@ -1969,46 +1976,11 @@ class Main(QWidget):
         if hasattr(self, "filters_btn"):
             self.filters_btn.setChecked(self.filters_visible)
 
-    def add_nav_button(self, text, mode):
-        button = QPushButton(text)
-        button.setObjectName("navButton")
-        button.setCheckable(True)
-        button.setChecked(mode == self.history_view)
-        button.clicked.connect(lambda checked=False, m=mode: self.set_history_view(m))
-        self.sidebar_layout.addWidget(button)
-        self.nav_buttons.append((button, mode))
-
-    def refresh_sidebar(self):
-        if not hasattr(self, "sidebar_layout"):
+    def refresh_favorites_panel(self):
+        if not hasattr(self, "favorite_count"):
             return
-        while self.sidebar_layout.count():
-            item = self.sidebar_layout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
-        self.nav_buttons = []
-        self.add_nav_button("Favorites", "__favorites__")
-        self.add_nav_button("This machine", "__this__")
-        self.add_nav_button("All history", "__all__")
-        for machine in self.history.machines():
-            self.add_nav_button(machine, machine)
-        self.sidebar_layout.addStretch()
-        settings_button = QPushButton("Settings")
-        settings_button.setObjectName("navButton")
-        settings_button.clicked.connect(self.settings)
-        self.sidebar_layout.addWidget(settings_button)
-
-    def update_nav_selection(self):
-        for button, mode in getattr(self, "nav_buttons", []):
-            button.setChecked(mode == self.history_view)
-
-    def set_history_view(self, mode):
-        self.history_view = mode or "__this__"
-        self.cfg.setdefault("history", {})["source_filter"] = self.history_view
-        self.save()
-        self.update_nav_selection()
-        if not self.search.text().strip():
-            self.refresh_history_view()
+        count = len(self.history.filtered("__favorites__"))
+        self.favorite_count.setText(f"{count:,} saved" if count else "No favorites")
 
     def set_preview_visible(self, visible, persist=True):
         self.preview_visible = bool(visible)
@@ -2039,6 +2011,7 @@ class Main(QWidget):
             self.load_selected_preview()
 
     def clear_preview(self, text="Select a result to preview."):
+        self.preview_pixmap = None
         if hasattr(self, "preview_image"):
             self.preview_image.clear()
             self.preview_image.setText("")
@@ -2056,6 +2029,7 @@ class Main(QWidget):
             return
         folder, file_name = result_display_parts(item, QsirchClient.path(item))
         self.preview_title.setText(file_name or "Preview")
+        self.preview_pixmap = None
         self.preview_image.clear()
         self.preview_text.setPlainText("Loading preview...")
         if not all((self.cfg.get("host"), self.cfg.get("user"), self.cfg.get("password"))):
@@ -2090,42 +2064,29 @@ class Main(QWidget):
         if isinstance(thumb, dict) and thumb.get("content"):
             pix = QPixmap()
             if pix.loadFromData(thumb["content"]):
-                target = self.preview_image.size()
-                self.preview_image.setPixmap(pix.scaled(target, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                self.preview_pixmap = pix
+                self.scale_preview_image()
             else:
                 self.preview_image.setText("Thumbnail unavailable")
         else:
             self.preview_image.setText("No thumbnail")
         self.preview_text.setPlainText(data.get("summary") or "No preview available.")
 
+    def scale_preview_image(self):
+        if not self.preview_pixmap or not hasattr(self, "preview_image"):
+            return
+        size = self.preview_image.contentsRect().size()
+        if size.width() < 16 or size.height() < 16:
+            size = self.preview_image.size()
+        self.preview_image.setPixmap(self.preview_pixmap.scaled(size, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.scale_preview_image()
+
     def preview_failed(self, msg):
         self.preview_image.clear()
         self.preview_text.setPlainText(msg or "Preview unavailable.")
-
-    def popout_preview(self):
-        d = QDialog(self)
-        d.setWindowTitle(self.preview_title.text() or "Preview")
-        d.resize(900, 700)
-        d.setStyleSheet(settings_stylesheet(self.cfg))
-        layout = QVBoxLayout(d)
-        image = QLabel()
-        image.setAlignment(Qt.AlignCenter)
-        image.setMinimumHeight(180)
-        if self.preview_image.pixmap():
-            image.setPixmap(self.preview_image.pixmap())
-            layout.addWidget(image)
-        text = QTextEdit()
-        text.setReadOnly(True)
-        text.setLineWrapMode(QTextEdit.WidgetWidth)
-        text.setPlainText(self.preview_text.toPlainText())
-        layout.addWidget(text, 1)
-        b = QHBoxLayout()
-        b.addStretch()
-        close = QPushButton("Close")
-        close.clicked.connect(d.accept)
-        b.addWidget(close)
-        layout.addLayout(b)
-        d.exec()
 
     def make_star_button(self, item, starred=None):
         button = QPushButton()
@@ -2293,10 +2254,7 @@ class Main(QWidget):
         return getattr(self, "history_view", history_defaults(self.cfg)["source_filter"]) or "__this__"
 
     def update_history_filter_choices(self):
-        current = self.current_history_filter()
-        self.refresh_sidebar()
-        self.history_view = current
-        self.update_nav_selection()
+        self.refresh_favorites_panel()
 
     def is_visibility_hidden(self, item):
         rules = visibility_rules(self.cfg)
@@ -2483,7 +2441,7 @@ class Main(QWidget):
             if clear_history:
                 self.history.clear_current_machine(clear_starred)
             self.history.load()
-            self.refresh_sidebar()
+            self.refresh_favorites_panel()
             self.refresh_history_view()
             if self.hotkey_warning:
                 QMessageBox.warning(self, "Shortcut unavailable", self.hotkey_warning)

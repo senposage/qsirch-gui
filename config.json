@@ -19,7 +19,7 @@
     "theme": "system",
     "highlight_matches": true,
     "preview_pane": false,
-    "standard_window": false,
+    "standard_window": true,
     "allow_download": false,
     "folders_first": true
   },
