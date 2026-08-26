@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "Qsirch Floating Search"
-APP_VERSION = "v10.14"
+APP_VERSION = "v10.15"
 COMPACT_HEIGHT = 132
 UPSTREAM_REPO = "https://github.com/iios-co/qsirch"
 FORK_REPO = "https://github.com/senposage/qsirch-gui"
@@ -546,6 +546,7 @@ def main_stylesheet(cfg):
         return """
         QWidget { color:#1f2328; }
         #card { background:#f7f8fa; border:1px solid #c9d1d9; border-radius:12px; }
+        #cardStandard { background:#f7f8fa; border:0; border-radius:0; }
         QLineEdit {
             background:#ffffff; color:#1f2328; border:1px solid #b8c0cc;
             border-radius:8px; padding:9px 12px; font-size:15px;
@@ -594,6 +595,7 @@ def main_stylesheet(cfg):
     return """
         QWidget { color:#e7e9eb; }
         #card { background:#202124; border:1px solid #3b3d42; border-radius:12px; }
+        #cardStandard { background:#202124; border:0; border-radius:0; }
         QLineEdit {
             background:#2b2c30; color:#f5f6f7; border:1px solid #4a4d54;
             border-radius:8px; padding:9px 12px; font-size:15px;
@@ -1623,10 +1625,10 @@ class Main(QWidget):
         CONFIG.write_text(json.dumps(self.cfg, indent=2))
 
     def build(self):
-        outer=QVBoxLayout(self); outer.setContentsMargins(10,10,10,10)
+        outer=QVBoxLayout(self); self.outer_layout = outer; outer.setContentsMargins(10,10,10,10)
         card=QFrame(); card.setObjectName("card"); self.card = card; outer.addWidget(card)
         card.installEventFilter(self)
-        v=QVBoxLayout(card); v.setContentsMargins(14,14,14,12); v.setSpacing(8)
+        v=QVBoxLayout(card); self.card_layout = v; v.setContentsMargins(14,14,14,12); v.setSpacing(8)
 
         top=QHBoxLayout()
         top.setSpacing(8)
@@ -1637,6 +1639,14 @@ class Main(QWidget):
         self.search.textChanged.connect(self.query_changed)
         self.search.textChanged.connect(lambda _: self.clear_btn.setEnabled(bool(self.search.text())))
         top.addWidget(self.search,1)
+
+        self.help_btn=QPushButton("?")
+        self.help_btn.setObjectName("toolButton")
+        self.help_btn.setToolTip("Search syntax")
+        self.help_btn.setFixedWidth(34)
+        self.help_btn.setMinimumHeight(36)
+        self.help_btn.clicked.connect(self.show_search_help)
+        top.addWidget(self.help_btn)
 
         self.clear_btn=QPushButton("Clear")
         self.clear_btn.setObjectName("toolButton")
@@ -1864,9 +1874,21 @@ class Main(QWidget):
         self.busy.setTextVisible(False)
         self.busy.hide()
         v.addWidget(self.busy)
+        self.apply_window_layout_mode()
 
     def apply_style(self):
         self.setStyleSheet(main_stylesheet(self.cfg))
+
+    def apply_window_layout_mode(self):
+        standard = behavior_defaults(self.cfg)["standard_window"]
+        if hasattr(self, "outer_layout"):
+            self.outer_layout.setContentsMargins(0 if standard else 10, 0 if standard else 10, 0 if standard else 10, 0 if standard else 10)
+        if hasattr(self, "card_layout"):
+            self.card_layout.setContentsMargins(12 if standard else 14, 12 if standard else 14, 12 if standard else 14, 10 if standard else 12)
+        if hasattr(self, "card"):
+            self.card.setObjectName("cardStandard" if standard else "card")
+            self.card.style().unpolish(self.card)
+            self.card.style().polish(self.card)
 
     def apply_window_flags(self):
         standard = behavior_defaults(self.cfg)["standard_window"]
@@ -1885,6 +1907,7 @@ class Main(QWidget):
         self.behavior = bcfg
         self.show_in_taskbar = bool(bcfg["show_in_taskbar"])
         self.setAttribute(Qt.WA_TranslucentBackground, not bcfg["standard_window"])
+        self.apply_window_layout_mode()
         self.apply_style()
         if taskbar_changed or frame_changed:
             self.apply_window_flags()
@@ -1900,6 +1923,20 @@ class Main(QWidget):
         if warning:
             self.status.setText(warning)
         return ok
+
+    def show_search_help(self):
+        QMessageBox.information(
+            self,
+            "Search syntax",
+            "\n".join([
+                'Use normal words, or quote an exact phrase: "invoice 123"',
+                "ext:pdf or type:docx filters by extension.",
+                "path:clients narrows results to matching paths.",
+                "-draft excludes matching text.",
+                "r/pattern/ applies a local regex filter.",
+                "Use Filters for category, OCR mode, dates, sort, and result limit.",
+            ])
+        )
 
     def nativeEvent(self, eventType, message):
         if sys.platform == "win32":
@@ -2324,8 +2361,7 @@ class Main(QWidget):
                 used = entry.get("lastUsed", "")
                 meta_parts = [x for x in (machine, ip, used) if x]
                 starred = result_key(item) in starred_keys
-                star_text = "Starred\n" if starred else ""
-                meta = star_text + str(file_name or name or "Saved result") + ("\n" + "  |  ".join(meta_parts) if meta_parts else "")
+                meta = str(file_name or name or "Saved result") + ("\n" + "  |  ".join(meta_parts) if meta_parts else "")
                 li = QListWidgetItem()
                 li.setData(Qt.UserRole, {"_history": True, "item": item})
                 row = QWidget()
