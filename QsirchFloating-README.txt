@@ -30,6 +30,11 @@ Appearance / behavior:
 - The global hide/unhide shortcut defaults to Ctrl+Space and can be changed without restarting.
 - If Windows reports the shortcut is already owned by another app, Settings shows a warning.
 
+HTTPS:
+- For HTTPS, use the NAS HTTPS port.
+- HTTPS certificate verification defaults off because many QNAP systems use self-signed certificates.
+- If HTTPS is accidentally saved on the normal HTTP port, the app retries port 443 once and saves it if login succeeds.
+
 Path mapping:
 - No drive/share mapping is hard-coded.
 - Add mappings in Settings > Path Mapping.

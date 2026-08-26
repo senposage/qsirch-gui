@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "Qsirch Floating Search"
-APP_VERSION = "v10.6"
+APP_VERSION = "v10.8"
 COMPACT_HEIGHT = 132
 UPSTREAM_REPO = "https://github.com/iios-co/qsirch"
 FORK_REPO = "https://github.com/senposage/qsirch-gui"
@@ -55,19 +55,26 @@ for i in range(1, 25):
     VK_NAMES[f"F{i}"] = 0x70 + i - 1
 
 class QsirchClient:
-    def __init__(self, host, port=8080, ssl=False):
+    def __init__(self, host, port=8080, ssl=False, verify_ssl=False):
         self.base = f"{'https' if ssl else 'http'}://{host}:{port}"
         self.s = requests.Session()
         self.user = self.pw = None
+        self.verify_ssl = bool(verify_ssl)
+        if ssl and not self.verify_ssl:
+            try:
+                requests.packages.urllib3.disable_warnings()
+            except Exception:
+                pass
 
     def login(self, user, pw):
         self.user, self.pw = user, pw
         b64 = base64.b64encode(pw.encode()).decode()
         try:
             r = self.s.post(self.base + "/cgi-bin/authLogin.cgi",
-                            data={"user": user, "pwd": b64}, timeout=10)
-        except requests.exceptions.SSLError as e:
-            raise RuntimeError(self.ssl_error_message(e))
+                            data={"user": user, "pwd": b64}, timeout=10,
+                            verify=self.verify_ssl)
+        except requests.exceptions.RequestException as e:
+            raise RuntimeError(self.connection_error_message(e))
         r.raise_for_status()
         x = ET.fromstring(r.text)
         if x.findtext("authPassed") != "1":
@@ -79,17 +86,17 @@ class QsirchClient:
 
     def request(self, method, path, **kw):
         try:
-            r = self.s.request(method, self.base + path, timeout=15, **kw)
-        except requests.exceptions.SSLError as e:
-            raise RuntimeError(self.ssl_error_message(e))
+            r = self.s.request(method, self.base + path, timeout=15, verify=self.verify_ssl, **kw)
+        except requests.exceptions.RequestException as e:
+            raise RuntimeError(self.connection_error_message(e))
         if r.status_code == 401:
             try:
                 if r.json().get("error", {}).get("code") == 101:
                     self.login(self.user, self.pw)
                     try:
-                        r = self.s.request(method, self.base + path, timeout=15, **kw)
-                    except requests.exceptions.SSLError as e:
-                        raise RuntimeError(self.ssl_error_message(e))
+                        r = self.s.request(method, self.base + path, timeout=15, verify=self.verify_ssl, **kw)
+                    except requests.exceptions.RequestException as e:
+                        raise RuntimeError(self.connection_error_message(e))
             except RuntimeError:
                 raise
             except Exception:
@@ -97,15 +104,25 @@ class QsirchClient:
         r.raise_for_status()
         return r
 
-    def ssl_error_message(self, err):
+    def connection_error_message(self, err):
         msg = str(err)
-        hint = (
-            "HTTPS failed during the SSL handshake. This usually means HTTPS is enabled "
-            "in Settings but the selected port is serving plain HTTP. Uncheck HTTPS for "
-            "the HTTP port, or keep HTTPS enabled and use the NAS HTTPS port."
-        )
         if "WRONG_VERSION_NUMBER" in msg.upper() or "wrong version number" in msg.lower():
-            return f"{hint}\n\nTechnical details: {msg}"
+            hint = (
+                "HTTPS reached a plain HTTP service. The selected port is not serving TLS. "
+                "Use the NAS HTTPS port, or turn HTTPS off for the HTTP port."
+            )
+        elif "CERTIFICATE_VERIFY_FAILED" in msg.upper() or "certificate verify failed" in msg.lower():
+            hint = (
+                "HTTPS connected, but the NAS certificate could not be verified. "
+                "For a self-signed QNAP certificate, leave certificate verification off."
+            )
+        elif "MAX RETRIES EXCEEDED" in msg.upper():
+            hint = (
+                "The app could not connect after retrying. Check the NAS host/IP, port, "
+                "firewall, and whether HTTPS is enabled on that port."
+            )
+        else:
+            hint = "The Qsirch connection failed."
         return f"{hint}\n\nTechnical details: {msg}"
 
     @staticmethod
@@ -718,6 +735,8 @@ class Settings(QDialog):
         self.pw.setEchoMode(QLineEdit.Password)
         self.ssl = QCheckBox("Use HTTPS")
         self.ssl.setChecked(self.cfg.get("ssl",False))
+        self.ssl_verify = QCheckBox("Verify HTTPS certificate")
+        self.ssl_verify.setChecked(self.cfg.get("ssl_verify", False))
         self.ssl_warning = QLabel("")
         self.ssl_warning.setWordWrap(True)
         self.ssl_warning.setStyleSheet("color: #ffcf7a;")
@@ -728,6 +747,7 @@ class Settings(QDialog):
         cf.addRow("Username", self.user)
         cf.addRow("Password", self.pw)
         cf.addRow("", self.ssl)
+        cf.addRow("", self.ssl_verify)
         cf.addRow("", self.ssl_warning)
         self.update_ssl_warning()
         self.tabs.addTab(conn, "Connection")
@@ -903,8 +923,11 @@ class Settings(QDialog):
         self.map_table.setItem(row, 1, QTableWidgetItem(target))
 
     def update_ssl_warning(self):
+        self.ssl_verify.setEnabled(self.ssl.isChecked())
         if self.ssl.isChecked() and self.port.value() == 8080:
             self.ssl_warning.setText("HTTPS is enabled on port 8080. If the NAS uses 8080 for HTTP, either uncheck HTTPS or choose the NAS HTTPS port.")
+        elif self.ssl.isChecked() and not self.ssl_verify.isChecked():
+            self.ssl_warning.setText("HTTPS certificate verification is off. This is usually needed for self-signed NAS certificates.")
         else:
             self.ssl_warning.clear()
 
@@ -1056,6 +1079,7 @@ class Settings(QDialog):
             "user": self.user.text(),
             "password": self.pw.text(),
             "ssl": self.ssl.isChecked(),
+            "ssl_verify": self.ssl_verify.isChecked(),
             "path_mappings": mappings,
             "exclude": {"folders": folders, "files": files},
             "behavior": {
@@ -1115,6 +1139,7 @@ class Main(QWidget):
                 "user":"",
                 "password":"",
                 "ssl":False,
+                "ssl_verify": False,
                 "path_mappings": [],
                 "exclude": {
                     "folders": [
@@ -1549,8 +1574,40 @@ class Main(QWidget):
             if not all((self.cfg.get("host"), self.cfg.get("user"), self.cfg.get("password"))):
                 raise RuntimeError("Configure the QNAP connection first")
         if not self.client:
-            self.client=QsirchClient(self.cfg["host"],self.cfg["port"],self.cfg["ssl"])
-            self.client.login(self.cfg["user"],self.cfg["password"])
+            self.client=QsirchClient(
+                self.cfg["host"],
+                self.cfg["port"],
+                self.cfg["ssl"],
+                self.cfg.get("ssl_verify", False),
+            )
+            try:
+                self.client.login(self.cfg["user"],self.cfg["password"])
+            except RuntimeError as e:
+                msg = str(e)
+                if self.cfg.get("ssl") and self.cfg.get("ssl_verify", False) and "certificate could not be verified" in msg.lower():
+                    self.cfg["ssl_verify"] = False
+                    self.save()
+                    self.client=QsirchClient(
+                        self.cfg["host"],
+                        self.cfg["port"],
+                        self.cfg["ssl"],
+                        False,
+                    )
+                    self.client.login(self.cfg["user"],self.cfg["password"])
+                    self.status.setText("HTTPS certificate verification turned off")
+                elif self.cfg.get("ssl") and int(self.cfg.get("port", 0) or 0) == 8080 and "SSL handshake" in msg:
+                    self.cfg["port"] = 443
+                    self.save()
+                    self.client=QsirchClient(
+                        self.cfg["host"],
+                        self.cfg["port"],
+                        self.cfg["ssl"],
+                        self.cfg.get("ssl_verify", False),
+                    )
+                    self.client.login(self.cfg["user"],self.cfg["password"])
+                    self.status.setText("HTTPS port changed to 443")
+                else:
+                    raise
         return self.client
 
     def clear_search(self):
