@@ -227,13 +227,22 @@
             <Button Content="Hide" DockPanel.Dock="Right" MinHeight="24" Padding="8,1" Click="HidePreviewClicked" />
             <TextBlock x:Name="PreviewTitle" Text="Preview" FontWeight="SemiBold" VerticalAlignment="Center" />
           </DockPanel>
-          <TextBox Text="{Binding PreviewText}"
+          <TextBox x:Name="PreviewTextBox"
+                   Text="{Binding PreviewText}"
                    IsReadOnly="True"
                    TextWrapping="Wrap"
                    AcceptsReturn="True"
                    FontFamily="Consolas"
                    VerticalScrollBarVisibility="Auto"
                    BorderThickness="0" />
+          <Border x:Name="PreviewImageHost"
+                  Visibility="Collapsed"
+                  Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}">
+            <Image x:Name="PreviewImage"
+                   Stretch="Uniform"
+                   HorizontalAlignment="Stretch"
+                   VerticalAlignment="Stretch" />
+          </Border>
         </DockPanel>
       </Border>
     </Grid>

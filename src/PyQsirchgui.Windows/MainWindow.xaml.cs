@@ -7,6 +7,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using PyQsirchgui.Windows.Models;
 using PyQsirchgui.Windows.Services;
 
@@ -558,12 +559,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         if (result == null)
         {
-            PreviewTitle.Text = "Preview";
-            PreviewText = "Select a result to preview.";
-            return;
+        PreviewTitle.Text = "Preview";
+        PreviewText = "Select a result to preview.";
+        ShowPreviewText();
+        return;
         }
         PreviewTitle.Text = result.FileName;
         PreviewText = $"{result.FileName}\r\n{result.DisplayPath}\r\n{result.Kind} {result.SizeText}".Trim();
+        ShowPreviewText();
     }
 
     private async Task LoadPreviewAsync(SearchResult? result)
@@ -576,42 +579,77 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         PreviewTitle.Text = result.FileName;
         PreviewText = "Loading preview...";
+        ShowPreviewText();
         var preview = await BuildPreviewAsync(result);
         if (CurrentPreviewResult() == result && _config.Behavior.PreviewPane)
         {
-            PreviewText = preview;
+            RenderPreview(preview);
         }
     }
 
-    private async Task<string> BuildPreviewAsync(SearchResult result)
+    private async Task<PreviewContent> BuildPreviewAsync(SearchResult result)
     {
         var header = $"{result.FileName}\r\n{result.DisplayPath}\r\n{result.Kind} {result.SizeText}".Trim();
         if (result.IsFolder)
         {
-            return header;
+            return PreviewContent.ForText(header);
         }
 
-        var local = await Task.Run(() => BuildLocalTextPreview(result, header));
-        if (!string.IsNullOrWhiteSpace(local))
+        var localImage = await Task.Run(() => BuildLocalImagePreview(result));
+        if (localImage != null)
         {
-            return local;
+            return PreviewContent.ForImage(localImage);
+        }
+
+        var localText = await Task.Run(() => BuildLocalTextPreview(result, header));
+        if (!string.IsNullOrWhiteSpace(localText))
+        {
+            return PreviewContent.ForText(localText);
         }
 
         try
         {
             using var client = new QsirchClient(_config);
-            var summary = await client.PreviewSummaryAsync(result, _searchCts?.Token ?? CancellationToken.None);
-            if (!string.IsNullOrWhiteSpace(summary))
+            var thumbnail = await client.ThumbnailAsync(result, _searchCts?.Token ?? CancellationToken.None);
+            if (thumbnail is { Length: > 0 })
             {
-                return $"{header}\r\n\r\n{summary}";
+                return PreviewContent.ForImage(thumbnail);
+            }
+
+            var preview = await client.PreviewAsync(result, _searchCts?.Token ?? CancellationToken.None);
+            if (!string.IsNullOrWhiteSpace(preview.Summary) && !preview.IsOnlineViewer)
+            {
+                return PreviewContent.ForText($"{header}\r\n\r\n{preview.Summary}");
+            }
+            if (!string.IsNullOrWhiteSpace(preview.Summary))
+            {
+                return PreviewContent.ForText($"{header}\r\n\r\nQsirch did not return a renderable preview for this file.");
             }
         }
         catch (Exception ex)
         {
-            return $"{header}\r\n\r\nPreview unavailable: {ex.Message}";
+            return PreviewContent.ForText($"{header}\r\n\r\nPreview unavailable: {ex.Message}");
         }
 
-        return $"{header}\r\n\r\nPreview unavailable.";
+        return PreviewContent.ForText($"{header}\r\n\r\nPreview unavailable.");
+    }
+
+    private byte[]? BuildLocalImagePreview(SearchResult result)
+    {
+        if (!IsImagePreviewType(result.Extension))
+        {
+            return null;
+        }
+
+        try
+        {
+            var path = _mapper.Resolve(result);
+            return File.Exists(path) ? File.ReadAllBytes(path) : null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private string BuildLocalTextPreview(SearchResult result, string header)
@@ -665,6 +703,49 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }.Contains(extension.TrimStart('.'));
     }
 
+    private static bool IsImagePreviewType(string extension)
+    {
+        return new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "jpg", "jpeg", "png", "gif", "bmp", "webp", "tif", "tiff"
+        }.Contains(extension.TrimStart('.'));
+    }
+
+    private void RenderPreview(PreviewContent preview)
+    {
+        if (preview.ImageBytes != null)
+        {
+            PreviewImage.Source = BitmapFromBytes(preview.ImageBytes);
+            PreviewText = "";
+            PreviewTextBox.Visibility = Visibility.Collapsed;
+            PreviewImageHost.Visibility = Visibility.Visible;
+            return;
+        }
+
+        PreviewImage.Source = null;
+        PreviewText = preview.Text;
+        ShowPreviewText();
+    }
+
+    private void ShowPreviewText()
+    {
+        PreviewImage.Source = null;
+        PreviewImageHost.Visibility = Visibility.Collapsed;
+        PreviewTextBox.Visibility = Visibility.Visible;
+    }
+
+    private static BitmapImage BitmapFromBytes(byte[] bytes)
+    {
+        using var stream = new MemoryStream(bytes);
+        var image = new BitmapImage();
+        image.BeginInit();
+        image.CacheOption = BitmapCacheOption.OnLoad;
+        image.StreamSource = stream;
+        image.EndInit();
+        image.Freeze();
+        return image;
+    }
+
     private void LoadFavorites()
     {
         FavoriteResults.Clear();
@@ -694,4 +775,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
+}
+
+internal sealed class PreviewContent
+{
+    public string Text { get; private init; } = "";
+    public byte[]? ImageBytes { get; private init; }
+
+    public static PreviewContent ForText(string text) => new() { Text = text };
+
+    public static PreviewContent ForImage(byte[] bytes) => new() { ImageBytes = bytes };
 }

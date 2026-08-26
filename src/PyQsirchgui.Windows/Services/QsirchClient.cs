@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using PyQsirchgui.Windows.Models;
 
@@ -12,6 +13,7 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
     private readonly HttpClient _http = CreateHttpClient(config);
     private readonly string _baseUrl = $"{(config.Ssl ? "https" : "http")}://{config.Host}:{config.Port}";
     private bool _loggedIn;
+    private string _sid = "";
 
     public async Task<IReadOnlyList<SearchResult>> SearchAsync(string query, FileTypeFilter typeFilter, CancellationToken cancellationToken)
     {
@@ -51,7 +53,7 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
         return results;
     }
 
-    public async Task<string> PreviewSummaryAsync(SearchResult result, CancellationToken cancellationToken)
+    public async Task<QsirchPreview> PreviewAsync(SearchResult result, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(config.Host) || string.IsNullOrWhiteSpace(config.User) || string.IsNullOrWhiteSpace(config.Password))
         {
@@ -62,9 +64,41 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
         var action = PreviewAction(result);
         using var response = await _http.GetAsync(action, cancellationToken);
         response.EnsureSuccessStatusCode();
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-        return PreviewSummary(doc.RootElement);
+        var contentType = response.Content.Headers.ContentType?.MediaType ?? "";
+        var text = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (contentType.Contains("html", StringComparison.OrdinalIgnoreCase) || text.TrimStart().StartsWith("<", StringComparison.Ordinal))
+        {
+            return new QsirchPreview { Summary = NormalizeWhitespace(StripHtml(text)) };
+        }
+        using var doc = JsonDocument.Parse(text);
+        return PreviewFromJson(doc.RootElement, action);
+    }
+
+    public async Task<byte[]?> ThumbnailAsync(SearchResult result, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(config.Host) || string.IsNullOrWhiteSpace(config.User) || string.IsNullOrWhiteSpace(config.Password))
+        {
+            return null;
+        }
+
+        await LoginAsync(cancellationToken);
+        var action = ThumbnailAction(result);
+        if (string.IsNullOrWhiteSpace(action))
+        {
+            return null;
+        }
+
+        using var response = await _http.GetAsync(action, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+        var contentType = response.Content.Headers.ContentType?.MediaType ?? "";
+        if (!contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+        return await response.Content.ReadAsByteArrayAsync(cancellationToken);
     }
 
     private async Task LoginAsync(CancellationToken cancellationToken)
@@ -87,13 +121,13 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
         {
             throw new InvalidOperationException("QNAP authentication failed.");
         }
-        var sid = xml.Root?.Element("authSid")?.Value;
-        if (string.IsNullOrWhiteSpace(sid))
+        _sid = xml.Root?.Element("authSid")?.Value ?? "";
+        if (string.IsNullOrWhiteSpace(_sid))
         {
             throw new InvalidOperationException("QNAP did not return an authSid.");
         }
         _http.DefaultRequestHeaders.Remove("Cookie");
-        _http.DefaultRequestHeaders.Add("Cookie", $"NAS_SID={sid}");
+        _http.DefaultRequestHeaders.Add("Cookie", $"NAS_SID={_sid}");
         _loggedIn = true;
     }
 
@@ -142,6 +176,36 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
         var path = Uri.EscapeDataString(result.Path);
         var name = Uri.EscapeDataString(result.Name);
         return $"{_baseUrl}/qsirch/latest/api/qusion-item?action=preview&path={path}&name={name}&app_id=badguy";
+    }
+
+    private string ThumbnailAction(SearchResult result)
+    {
+        if (result.Raw.ValueKind != JsonValueKind.Object ||
+            !result.Raw.TryGetProperty("actions", out var actions) ||
+            !actions.TryGetProperty("thumbnail", out var thumbnail) ||
+            thumbnail.ValueKind == JsonValueKind.Null ||
+            string.IsNullOrWhiteSpace(thumbnail.ToString()))
+        {
+            return "";
+        }
+
+        var action = thumbnail.ToString() ?? "";
+        return action.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? action : _baseUrl + action;
+    }
+
+    private QsirchPreview PreviewFromJson(JsonElement data, string actionUrl)
+    {
+        var summary = PreviewSummary(data);
+        var container = GetString(data, "container_type");
+        if (string.IsNullOrWhiteSpace(container))
+        {
+            container = GetString(data, "type");
+        }
+        return new QsirchPreview
+        {
+            Summary = summary,
+            IsOnlineViewer = container.Equals("online_viewer", StringComparison.OrdinalIgnoreCase),
+        };
     }
 
     private static string PreviewSummary(JsonElement data)
@@ -205,12 +269,12 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
 
     private static string StripHtml(string value)
     {
-        return System.Text.RegularExpressions.Regex.Replace(value ?? "", "<[^>]+>", " ");
+        return Regex.Replace(value ?? "", "<[^>]+>", " ");
     }
 
     private static string NormalizeWhitespace(string value)
     {
-        return System.Text.RegularExpressions.Regex.Replace(value ?? "", "\\s+", " ").Trim();
+        return Regex.Replace(value ?? "", "\\s+", " ").Trim();
     }
 
     private static bool IsFolder(SearchResult result, JsonElement element)
@@ -263,4 +327,10 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
     }
 
     public void Dispose() => _http.Dispose();
+}
+
+public sealed class QsirchPreview
+{
+    public string Summary { get; init; } = "";
+    public bool IsOnlineViewer { get; init; }
 }
