@@ -576,14 +576,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         PreviewTitle.Text = result.FileName;
         PreviewText = "Loading preview...";
-        var preview = await Task.Run(() => BuildLocalPreview(result));
+        var preview = await BuildPreviewAsync(result);
         if (CurrentPreviewResult() == result && _config.Behavior.PreviewPane)
         {
             PreviewText = preview;
         }
     }
 
-    private string BuildLocalPreview(SearchResult result)
+    private async Task<string> BuildPreviewAsync(SearchResult result)
     {
         var header = $"{result.FileName}\r\n{result.DisplayPath}\r\n{result.Kind} {result.SizeText}".Trim();
         if (result.IsFolder)
@@ -591,23 +591,49 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return header;
         }
 
-        string path;
+        var local = await Task.Run(() => BuildLocalTextPreview(result, header));
+        if (!string.IsNullOrWhiteSpace(local))
+        {
+            return local;
+        }
+
         try
         {
-            path = _mapper.Resolve(result);
+            using var client = new QsirchClient(_config);
+            var summary = await client.PreviewSummaryAsync(result, _searchCts?.Token ?? CancellationToken.None);
+            if (!string.IsNullOrWhiteSpace(summary))
+            {
+                return $"{header}\r\n\r\n{summary}";
+            }
         }
         catch (Exception ex)
         {
             return $"{header}\r\n\r\nPreview unavailable: {ex.Message}";
         }
 
-        if (!File.Exists(path))
-        {
-            return $"{header}\r\n\r\nPreview unavailable: mapped file was not found.";
-        }
+        return $"{header}\r\n\r\nPreview unavailable.";
+    }
+
+    private string BuildLocalTextPreview(SearchResult result, string header)
+    {
         if (!IsTextPreviewType(result.Extension))
         {
-            return $"{header}\r\n\r\nNo local text preview is available for this file type yet.";
+            return "";
+        }
+
+        string path;
+        try
+        {
+            path = _mapper.Resolve(result);
+        }
+        catch
+        {
+            return "";
+        }
+
+        if (!File.Exists(path))
+        {
+            return "";
         }
 
         try
@@ -625,9 +651,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
             return $"{header}\r\n\r\n{builder}".TrimEnd();
         }
-        catch (Exception ex)
+        catch
         {
-            return $"{header}\r\n\r\nPreview unavailable: {ex.Message}";
+            return "";
         }
     }
 

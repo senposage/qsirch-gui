@@ -51,6 +51,22 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
         return results;
     }
 
+    public async Task<string> PreviewSummaryAsync(SearchResult result, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(config.Host) || string.IsNullOrWhiteSpace(config.User) || string.IsNullOrWhiteSpace(config.Password))
+        {
+            throw new InvalidOperationException("Configure the NAS connection in Settings first.");
+        }
+
+        await LoginAsync(cancellationToken);
+        var action = PreviewAction(result);
+        using var response = await _http.GetAsync(action, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        return PreviewSummary(doc.RootElement);
+    }
+
     private async Task LoginAsync(CancellationToken cancellationToken)
     {
         if (_loggedIn)
@@ -109,6 +125,92 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
             handler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
         }
         return new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(15) };
+    }
+
+    private string PreviewAction(SearchResult result)
+    {
+        if (result.Raw.ValueKind == JsonValueKind.Object &&
+            result.Raw.TryGetProperty("actions", out var actions) &&
+            actions.TryGetProperty("preview", out var preview) &&
+            preview.ValueKind != JsonValueKind.Null &&
+            !string.IsNullOrWhiteSpace(preview.ToString()))
+        {
+            var action = preview.ToString() ?? "";
+            return action.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? action : _baseUrl + action;
+        }
+
+        var path = Uri.EscapeDataString(result.Path);
+        var name = Uri.EscapeDataString(result.Name);
+        return $"{_baseUrl}/qsirch/latest/api/qusion-item?action=preview&path={path}&name={name}&app_id=badguy";
+    }
+
+    private static string PreviewSummary(JsonElement data)
+    {
+        if (data.ValueKind != JsonValueKind.Object)
+        {
+            return "";
+        }
+
+        var lines = new List<string>();
+        var container = GetString(data, "container_type");
+        if (string.IsNullOrWhiteSpace(container))
+        {
+            container = GetString(data, "type");
+        }
+        if (!string.IsNullOrWhiteSpace(container))
+        {
+            lines.Add($"Preview type: {container}");
+        }
+
+        foreach (var key in new[] { "title", "subject", "from", "to", "date", "modified", "created" })
+        {
+            var value = GetString(data, key);
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                lines.Add($"{char.ToUpperInvariant(key[0]) + key[1..]}: {value}");
+            }
+        }
+
+        var body = StripHtml(GetString(data, "html"));
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            body = GetString(data, "text");
+        }
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            body = GetString(data, "content");
+        }
+        body = NormalizeWhitespace(body);
+        if (!string.IsNullOrWhiteSpace(body))
+        {
+            lines.Add("");
+            lines.Add(body.Length > 1800 ? body[..1800] : body);
+        }
+
+        if (data.TryGetProperty("info", out var info) && info.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var entry in info.EnumerateArray().Take(12))
+            {
+                var key = GetString(entry, "key");
+                var value = GetString(entry, "value");
+                if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(value))
+                {
+                    lines.Add($"{key}: {value}");
+                }
+            }
+        }
+
+        return string.Join(Environment.NewLine, lines).Trim();
+    }
+
+    private static string StripHtml(string value)
+    {
+        return System.Text.RegularExpressions.Regex.Replace(value ?? "", "<[^>]+>", " ");
+    }
+
+    private static string NormalizeWhitespace(string value)
+    {
+        return System.Text.RegularExpressions.Regex.Replace(value ?? "", "\\s+", " ").Trim();
     }
 
     private static bool IsFolder(SearchResult result, JsonElement element)
