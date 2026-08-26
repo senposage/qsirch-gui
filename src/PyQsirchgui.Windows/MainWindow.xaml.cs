@@ -598,7 +598,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var localImage = await Task.Run(() => BuildLocalImagePreview(result));
         if (localImage != null)
         {
-            return PreviewContent.ForImage(localImage);
+            return PreviewContent.ForImage(localImage, "Preview");
         }
 
         var localText = await Task.Run(() => BuildLocalTextPreview(result, header));
@@ -613,7 +613,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             var thumbnail = await client.ThumbnailAsync(result, _searchCts?.Token ?? CancellationToken.None);
             if (thumbnail is { Length: > 0 })
             {
-                return PreviewContent.ForImage(thumbnail);
+                return PreviewContent.ForImage(thumbnail, "Thumbnail");
             }
 
             var preview = await client.PreviewAsync(result, _searchCts?.Token ?? CancellationToken.None);
@@ -716,6 +716,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (preview.ImageBytes != null)
         {
             PreviewImage.Source = BitmapFromBytes(preview.ImageBytes);
+            PreviewTitle.Text = preview.Title;
             PreviewText = "";
             PreviewTextBox.Visibility = Visibility.Collapsed;
             PreviewImageHost.Visibility = Visibility.Visible;
@@ -780,9 +781,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 internal sealed class PreviewContent
 {
     public string Text { get; private init; } = "";
+    public string Title { get; private init; } = "Preview";
     public byte[]? ImageBytes { get; private init; }
 
     public static PreviewContent ForText(string text) => new() { Text = text };
 
-    public static PreviewContent ForImage(byte[] bytes) => new() { ImageBytes = bytes };
+    public static PreviewContent ForImage(byte[] bytes, string title) => new() { ImageBytes = bytes, Title = title };
 }

@@ -239,9 +239,12 @@
                   Visibility="Collapsed"
                   Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}">
             <Image x:Name="PreviewImage"
-                   Stretch="Uniform"
-                   HorizontalAlignment="Stretch"
-                   VerticalAlignment="Stretch" />
+                   Stretch="None"
+                   RenderOptions.BitmapScalingMode="HighQuality"
+                   SnapsToDevicePixels="True"
+                   UseLayoutRounding="True"
+                   HorizontalAlignment="Center"
+                   VerticalAlignment="Center" />
           </Border>
         </DockPanel>
       </Border>
