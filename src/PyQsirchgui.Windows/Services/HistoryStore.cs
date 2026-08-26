@@ -44,16 +44,19 @@ public sealed class HistoryStore(AppConfig config)
         }
 
         var entries = Entries().ToList();
+        var byKey = entries.ToDictionary(
+            entry => $"{entry.Path}\0{entry.Name}\0{entry.MachineId}".ToLowerInvariant(),
+            entry => entry,
+            StringComparer.OrdinalIgnoreCase);
         var now = DateTime.Now.ToString("s");
         foreach (var result in results)
         {
-            var existing = entries.FirstOrDefault(entry =>
-                entry.Path.Equals(result.Path, StringComparison.OrdinalIgnoreCase) &&
-                entry.Name.Equals(result.Name, StringComparison.OrdinalIgnoreCase) &&
-                entry.MachineId.Equals(MachineId, StringComparison.OrdinalIgnoreCase));
-            if (existing == null)
+            var key = $"{result.Path}\0{result.Name}\0{MachineId}".ToLowerInvariant();
+            if (!byKey.TryGetValue(key, out var existing))
             {
-                entries.Add(HistoryEntry.FromResult(result, now));
+                existing = HistoryEntry.FromResult(result, now);
+                entries.Add(existing);
+                byKey[key] = existing;
             }
             else
             {
@@ -94,10 +97,15 @@ public sealed class HistoryStore(AppConfig config)
 
     public bool IsStarred(SearchResult result)
     {
-        return Entries().Any(entry =>
-            entry.Starred &&
-            entry.Path.Equals(result.Path, StringComparison.OrdinalIgnoreCase) &&
-            entry.Name.Equals(result.Name, StringComparison.OrdinalIgnoreCase));
+        return StarredKeys().Contains(ResultKey(result.Path, result.Name));
+    }
+
+    public HashSet<string> StarredKeys()
+    {
+        return Entries()
+            .Where(entry => entry.Starred)
+            .Select(entry => ResultKey(entry.Path, entry.Name))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
     public void ClearCurrentMachine(bool clearStarred)
@@ -185,6 +193,13 @@ public sealed class HistoryStore(AppConfig config)
             .Take(Math.Max(1, config.History.MaxEntries))
             .ToList();
         File.WriteAllText(path, JsonSerializer.Serialize(new { version = 2, results = normalized }, JsonOptions));
+    }
+
+    public static string ResultKey(SearchResult result) => ResultKey(result.Path, result.Name);
+
+    private static string ResultKey(string path, string name)
+    {
+        return $"{path}\0{name}".ToLowerInvariant();
     }
 
     private static string MachineName => Environment.MachineName;

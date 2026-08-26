@@ -147,7 +147,10 @@
                   ItemsSource="{Binding VisibleResults}"
                   MouseDoubleClick="ResultDoubleClicked"
                   SelectionChanged="ResultSelectionChanged"
-                  PreviewMouseRightButtonDown="ResultRightButtonDown">
+                  PreviewMouseRightButtonDown="ResultRightButtonDown"
+                  VirtualizingPanel.IsVirtualizing="True"
+                  VirtualizingPanel.VirtualizationMode="Recycling"
+                  ScrollViewer.CanContentScroll="True">
           <ListView.ContextMenu>
             <ContextMenu>
               <MenuItem Header="Open" Click="OpenClicked" />
@@ -193,7 +196,10 @@
                  PreviewMouseRightButtonDown="ResultRightButtonDown"
                  Visibility="Collapsed"
                  ItemTemplate="{StaticResource ExplorerIconTemplate}"
-                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                 VirtualizingPanel.IsVirtualizing="True"
+                 VirtualizingPanel.VirtualizationMode="Recycling"
+                 ScrollViewer.CanContentScroll="True">
           <ListBox.ContextMenu>
             <ContextMenu>
               <MenuItem Header="Open" Click="OpenClicked" />

@@ -184,8 +184,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 StatusText = "Saved results; NAS returned none";
                 return;
             }
-            var visible = results.Where(result => !_rules.IsHidden(result)).ToList();
-            _history.AddResults(results);
+            var visible = await Task.Run(() => results.Where(result => !_rules.IsHidden(result)).ToList());
+            await Task.Run(() => _history.AddResults(results));
             ReplaceResults(visible);
             LoadFavorites();
             StatusText = visible.Count == 0 && results.Count > 0 ? "No visible results" : "Ready";
@@ -472,10 +472,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void ReplaceResults(IEnumerable<SearchResult> results)
     {
+        var starred = _history.StarredKeys();
         _allResults.Clear();
         foreach (var result in SortResults(results))
         {
-            result.IsFavorite = _history.IsStarred(result);
+            result.IsFavorite = starred.Contains(HistoryStore.ResultKey(result));
             _allResults.Add(result);
         }
         ApplyLocalFilters();
