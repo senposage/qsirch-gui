@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "Qsirch Floating Search"
-APP_VERSION = "v10.10"
+APP_VERSION = "v10.11"
 COMPACT_HEIGHT = 132
 UPSTREAM_REPO = "https://github.com/iios-co/qsirch"
 FORK_REPO = "https://github.com/senposage/qsirch-gui"
@@ -203,6 +203,72 @@ def local_ipv4():
     except Exception:
         pass
     return ""
+
+def windows_identity_names():
+    host = os.environ.get("COMPUTERNAME") or socket.gethostname()
+    user = os.environ.get("USERNAME") or os.environ.get("USER") or ""
+    domain = os.environ.get("USERDOMAIN") or ""
+    names = {x.casefold() for x in (host, user) if x}
+    if domain and user:
+        names.add(f"{domain}\\{user}".casefold())
+    return names
+
+def parse_visibility_rule(rule):
+    if isinstance(rule, dict):
+        action = str(rule.get("access") or rule.get("action") or "deny").strip().lower()
+        identity = str(rule.get("identity") or "*").strip() or "*"
+        pattern = str(rule.get("pattern") or rule.get("path") or "").strip()
+    else:
+        text = str(rule or "").strip()
+        action = "deny"
+        identity = "*"
+        pattern = text
+        if text[:1] in ("+", "-"):
+            action = "allow" if text[:1] == "+" else "deny"
+            rest = text[1:]
+            if ":" in rest:
+                identity, pattern = rest.split(":", 1)
+                identity = identity.strip() or "*"
+                pattern = pattern.strip()
+            else:
+                pattern = rest.strip()
+    if action not in ("allow", "deny"):
+        action = "deny"
+    return {"access": action, "identity": identity, "pattern": pattern}
+
+def visibility_rules(cfg):
+    return [
+        parsed for parsed in (
+            parse_visibility_rule(x) for x in (cfg.get("visibility_rules") or cfg.get("visibility", []) or [])
+        )
+        if parsed["pattern"]
+    ]
+
+def visibility_identity_matches(identity, current_names):
+    ident = str(identity or "*").strip().casefold()
+    if ident in ("", "*", "everyone", "all users", "users"):
+        return True, 0
+    if ident in current_names:
+        return True, 2 if "\\" in ident else 1
+    return False, -1
+
+def path_matches_visibility_pattern(qpath, pattern):
+    norm_path = str(qpath or "").replace("/", "\\").strip()
+    rule = str(pattern or "").replace("/", "\\").strip()
+    if not norm_path or not rule:
+        return False
+    parent = norm_path.rstrip("\\")
+    components = [x for x in parent.split("\\") if x]
+    candidates = {parent.casefold(), (parent.rstrip("\\") + "\\").casefold()}
+    for idx in range(len(components)):
+        tail = "\\".join(components[idx:])
+        if tail:
+            candidates.add(tail.casefold())
+            candidates.add((tail.rstrip("\\") + "\\").casefold())
+    rl = rule.casefold()
+    if any(ch in rule for ch in "*?[]"):
+        return any(fnmatch.fnmatch(candidate, rl) for candidate in candidates)
+    return any(candidate == rl or candidate.startswith(rl.rstrip("\\").casefold() + "\\") for candidate in candidates)
 
 def history_defaults(cfg):
     raw = cfg.get("history", {}) or {}
@@ -683,6 +749,17 @@ class HistoryStore:
                 return bool(entry.get("starred", False))
         return False
 
+    def starred_keys(self):
+        self.load()
+        keys = set()
+        for entry in self.entries:
+            if not entry.get("starred"):
+                continue
+            stored = entry.get("item") if isinstance(entry.get("item"), dict) else entry
+            if entry.get("machineId") == self.machine_id or entry.get("machine") == self.machine:
+                keys.add(result_key(stored))
+        return keys
+
     def set_starred(self, item, starred):
         if not self.enabled or not isinstance(item, dict):
             return
@@ -956,6 +1033,38 @@ class Settings(QDialog):
             self.file_list.addItem(x)
         self.tabs.addTab(excl, "Exclusions")
 
+        visible = QWidget()
+        vv = QVBoxLayout(visible)
+        visible_note = QLabel(
+            "Visibility rules only hide or show results in this app. They do not change NAS permissions."
+        )
+        visible_note.setWordWrap(True)
+        vv.addWidget(visible_note)
+        self.visibility_table = QTableWidget(0, 3)
+        self.visibility_table.setHorizontalHeaderLabels(["Access", "Identity", "Path pattern"])
+        self.visibility_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.visibility_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.visibility_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.visibility_table.verticalHeader().setVisible(False)
+        self.visibility_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.visibility_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        vv.addWidget(self.visibility_table, 1)
+        vb = QHBoxLayout()
+        add_visibility = QPushButton("Add")
+        edit_visibility = QPushButton("Edit")
+        remove_visibility = QPushButton("Remove")
+        add_visibility.clicked.connect(self.add_visibility_rule)
+        edit_visibility.clicked.connect(self.edit_visibility_rule)
+        remove_visibility.clicked.connect(self.remove_visibility_rule)
+        vb.addWidget(add_visibility)
+        vb.addWidget(edit_visibility)
+        vb.addWidget(remove_visibility)
+        vb.addStretch()
+        vv.addLayout(vb)
+        for rule in visibility_rules(self.cfg):
+            self._append_visibility_rule(rule["access"], rule["identity"], rule["pattern"])
+        self.tabs.addTab(visible, "Visibility")
+
         hist = QWidget()
         hf = QFormLayout(hist)
         hcfg = history_defaults(self.cfg)
@@ -1031,6 +1140,14 @@ class Settings(QDialog):
         self.map_table.setItem(row, 0, QTableWidgetItem(source))
         self.map_table.setItem(row, 1, QTableWidgetItem(target))
 
+    def _append_visibility_rule(self, access, identity, pattern):
+        row = self.visibility_table.rowCount()
+        self.visibility_table.insertRow(row)
+        label = "Allow" if str(access).lower() == "allow" else "Deny"
+        self.visibility_table.setItem(row, 0, QTableWidgetItem(label))
+        self.visibility_table.setItem(row, 1, QTableWidgetItem(identity or "*"))
+        self.visibility_table.setItem(row, 2, QTableWidgetItem(pattern or ""))
+
     def update_ssl_warning(self):
         self.ssl_verify.setEnabled(self.ssl.isChecked())
         if self.ssl.isChecked() and self.port.value() == 8080:
@@ -1090,6 +1207,62 @@ class Settings(QDialog):
         row = self.map_table.currentRow()
         if row >= 0:
             self.map_table.removeRow(row)
+
+    def _visibility_dialog(self, access="deny", identity="*", pattern=""):
+        d = QDialog(self)
+        d.setStyleSheet(self.styleSheet())
+        d.setWindowTitle("Visibility Rule")
+        f = QFormLayout(d)
+        access_box = QComboBox()
+        access_box.addItem("Deny", "deny")
+        access_box.addItem("Allow", "allow")
+        idx = access_box.findData(str(access or "deny").lower())
+        access_box.setCurrentIndex(idx if idx >= 0 else 0)
+        ident = QLineEdit(identity or "*")
+        ident.setPlaceholderText("*, username, DOMAIN\\username, or HOSTNAME")
+        path = QLineEdit(pattern)
+        path.setPlaceholderText("Share\\Folder\\*")
+        note = QLabel("Deny everyone with * or a blank identity, then add Allow rows for users or hosts that should see the path.")
+        note.setWordWrap(True)
+        f.addRow("Access", access_box)
+        f.addRow("Identity", ident)
+        f.addRow("Path pattern", path)
+        f.addRow("", note)
+        b = QHBoxLayout()
+        b.addStretch()
+        c = QPushButton("Cancel")
+        o = QPushButton("OK")
+        c.clicked.connect(d.reject)
+        o.clicked.connect(d.accept)
+        b.addWidget(c); b.addWidget(o)
+        f.addRow("", b)
+        if d.exec() and path.text().strip():
+            return access_box.currentData(), ident.text().strip() or "*", path.text().strip()
+        return None
+
+    def add_visibility_rule(self):
+        result = self._visibility_dialog()
+        if result:
+            self._append_visibility_rule(*result)
+
+    def edit_visibility_rule(self):
+        row = self.visibility_table.currentRow()
+        if row < 0:
+            return
+        access_text = self.visibility_table.item(row, 0).text() if self.visibility_table.item(row, 0) else "Deny"
+        access = "allow" if access_text.lower() == "allow" else "deny"
+        identity = self.visibility_table.item(row, 1).text() if self.visibility_table.item(row, 1) else "*"
+        pattern = self.visibility_table.item(row, 2).text() if self.visibility_table.item(row, 2) else ""
+        result = self._visibility_dialog(access, identity, pattern)
+        if result:
+            self.visibility_table.setItem(row, 0, QTableWidgetItem("Allow" if result[0] == "allow" else "Deny"))
+            self.visibility_table.setItem(row, 1, QTableWidgetItem(result[1]))
+            self.visibility_table.setItem(row, 2, QTableWidgetItem(result[2]))
+
+    def remove_visibility_rule(self):
+        row = self.visibility_table.currentRow()
+        if row >= 0:
+            self.visibility_table.removeRow(row)
 
     def add_exclusion(self, widget, title):
         d = QDialog(self)
@@ -1181,6 +1354,20 @@ class Settings(QDialog):
 
         folders = [self.folder_list.item(i).text() for i in range(self.folder_list.count())]
         files = [self.file_list.item(i).text() for i in range(self.file_list.count())]
+        rules = []
+        for row in range(self.visibility_table.rowCount()):
+            access_item = self.visibility_table.item(row, 0)
+            identity_item = self.visibility_table.item(row, 1)
+            pattern_item = self.visibility_table.item(row, 2)
+            access_text = access_item.text().strip() if access_item else "Deny"
+            identity = identity_item.text().strip() if identity_item else "*"
+            pattern = pattern_item.text().strip() if pattern_item else ""
+            if pattern:
+                rules.append({
+                    "access": "allow" if access_text.lower() == "allow" else "deny",
+                    "identity": identity or "*",
+                    "pattern": pattern,
+                })
 
         return {
             "host": self.host.text().strip(),
@@ -1191,6 +1378,7 @@ class Settings(QDialog):
             "ssl_verify": self.ssl_verify.isChecked(),
             "path_mappings": mappings,
             "exclude": {"folders": folders, "files": files},
+            "visibility_rules": rules,
             "behavior": {
                 "show_in_taskbar": self.show_taskbar.isChecked(),
                 "global_hotkey": hotkey_text,
@@ -1219,6 +1407,7 @@ class Main(QWidget):
         self.client = None
         self.worker = None
         self.preview_worker = None
+        self.preview_workers = []
         self.preview_request_id = 0
         self.results = []
         self.history = HistoryStore(self.cfg)
@@ -1230,7 +1419,7 @@ class Main(QWidget):
         self.pinned = bool(self.cfg.get("always_on_top", True))
         self.behavior = behavior_defaults(self.cfg)
         self.show_in_taskbar = bool(self.behavior["show_in_taskbar"])
-        self.preview_visible = bool(self.behavior["preview_pane"])
+        self.preview_visible = False
         self.hotkey_manager = HotkeyManager(self)
         self.hotkey_warning = ""
         self.apply_window_flags()
@@ -1285,6 +1474,7 @@ class Main(QWidget):
                         "*conflicted copy*"
                     ]
                 },
+                "visibility_rules": [],
                 "history": {"enabled": True, "file": "history.json", "max_entries": 200},
                 "behavior": {"show_in_taskbar": True, "global_hotkey": "Ctrl+Space", "theme": "system", "highlight_matches": True, "preview_pane": False},
                 "always_on_top": True
@@ -1339,7 +1529,7 @@ class Main(QWidget):
         self.preview_btn.setObjectName("toolButton")
         self.preview_btn.setToolTip("Show or hide the preview pane")
         self.preview_btn.setCheckable(True)
-        self.preview_btn.setChecked(self.preview_visible)
+        self.preview_btn.setChecked(False)
         self.preview_btn.setFixedWidth(74)
         self.preview_btn.setMinimumHeight(36)
         self.preview_btn.clicked.connect(self.toggle_preview_pane)
@@ -1427,7 +1617,7 @@ class Main(QWidget):
         self.content_splitter.addWidget(self.preview_panel)
         self.content_splitter.setStretchFactor(0, 3)
         self.content_splitter.setStretchFactor(1, 2)
-        self.preview_panel.setVisible(self.preview_visible)
+        self.preview_panel.setVisible(False)
         v.addWidget(self.content_splitter,1)
 
         bottom=QHBoxLayout()
@@ -1463,9 +1653,7 @@ class Main(QWidget):
         taskbar_changed = self.show_in_taskbar != bcfg["show_in_taskbar"]
         self.behavior = bcfg
         self.show_in_taskbar = bool(bcfg["show_in_taskbar"])
-        self.preview_visible = bool(bcfg["preview_pane"])
         self.apply_style()
-        self.set_preview_visible(self.preview_visible, persist=False)
         if taskbar_changed:
             self.apply_window_flags()
             if was_visible:
@@ -1513,8 +1701,10 @@ class Main(QWidget):
         if persist:
             self.cfg.setdefault("behavior", {})["preview_pane"] = self.preview_visible
             self.save()
-        if self.preview_visible:
+        if self.preview_visible and persist:
             self.load_selected_preview()
+        elif self.preview_visible:
+            self.clear_preview()
         else:
             self.clear_preview("Preview hidden")
 
@@ -1568,10 +1758,13 @@ class Main(QWidget):
                     summary = str(e)
             return {"request_id": rid, "thumbnail": thumb, "summary": summary}
 
-        self.preview_worker = Worker(fn, item, request_id)
-        self.preview_worker.done.connect(self.preview_loaded)
-        self.preview_worker.fail.connect(self.preview_failed)
-        self.preview_worker.start()
+        worker = Worker(fn, item, request_id)
+        self.preview_workers.append(worker)
+        self.preview_worker = worker
+        worker.done.connect(self.preview_loaded)
+        worker.fail.connect(self.preview_failed)
+        worker.finished.connect(lambda w=worker: self.preview_workers.remove(w) if w in self.preview_workers else None)
+        worker.start()
 
     def preview_loaded(self, data):
         if not isinstance(data, dict) or data.get("request_id") != self.preview_request_id:
@@ -1592,27 +1785,26 @@ class Main(QWidget):
         self.preview_image.clear()
         self.preview_text.setText(msg or "Preview unavailable.")
 
-    def make_star_button(self, item):
+    def make_star_button(self, item, starred=None):
         button = QPushButton()
-        button.setFixedWidth(76)
+        button.setFixedWidth(38)
         button.setToolTip("Keep this result in saved history")
-        starred = self.history.is_starred(item)
-        button.setText("Starred" if starred else "Star")
-        button.clicked.connect(lambda checked=False, x=item: self.toggle_star(x))
+        if starred is None:
+            starred = self.history.is_starred(item)
+        button.setText("★" if starred else "☆")
+        button.clicked.connect(lambda checked=False, x=item, b=button: self.toggle_star(x, b))
         return button
 
-    def toggle_star(self, item):
+    def toggle_star(self, item, button=None):
         if isinstance(item, dict) and item.get("_history"):
             item = item.get("item", item)
         if not isinstance(item, dict):
             return
         starred = not self.history.is_starred(item)
         self.history.set_starred(item, starred)
-        self.status.setText("Starred result" if starred else "Removed star")
-        if self.search.text().strip():
-            self.render_results(len(self.results), 0, self.status.text())
-        else:
-            self.refresh_history_view()
+        if button is not None:
+            button.setText("★" if starred else "☆")
+        self.status.setText("Added to favorites" if starred else "Removed from favorites")
 
     def toggle_pin(self):
         self.pinned = bool(self.pin_btn.isChecked())
@@ -1719,6 +1911,27 @@ class Main(QWidget):
         self.history_filter.setCurrentIndex(idx if idx >= 0 else 0)
         self.history_filter.blockSignals(False)
 
+    def is_visibility_hidden(self, item):
+        rules = visibility_rules(self.cfg)
+        if not rules:
+            return False
+        qpath = self._norm_path(QsirchClient.path(item))
+        if not qpath:
+            return False
+        identities = windows_identity_names()
+        matches = []
+        for rule in rules:
+            if not path_matches_visibility_pattern(qpath, rule["pattern"]):
+                continue
+            applies, specificity = visibility_identity_matches(rule["identity"], identities)
+            if applies:
+                matches.append((specificity, rule["access"]))
+        if not matches:
+            return False
+        best = max(specificity for specificity, _ in matches)
+        best_actions = [access for specificity, access in matches if specificity == best]
+        return "allow" not in best_actions
+
     def add_sized_row(self, item, row, minimum_height=58):
         row.setMinimumHeight(minimum_height)
         row.adjustSize()
@@ -1733,7 +1946,13 @@ class Main(QWidget):
         self.refreshing_history = True
         try:
             self.update_history_filter_choices()
-            entries = self.history.filtered(self.current_history_filter())
+            raw_entries = self.history.filtered(self.current_history_filter())
+            entries = []
+            for entry in raw_entries:
+                item = entry.get("item") if isinstance(entry.get("item"), dict) else entry
+                if not self.is_visibility_hidden(item):
+                    entries.append(entry)
+            starred_keys = self.history.starred_keys()
             self.list.clear()
             for entry in entries:
                 item = entry.get("item") if isinstance(entry.get("item"), dict) else entry
@@ -1747,7 +1966,7 @@ class Main(QWidget):
                 ip = entry.get("ip", "")
                 used = entry.get("lastUsed", "")
                 meta_parts = [x for x in (machine, ip, used) if x]
-                starred = self.history.is_starred(item)
+                starred = result_key(item) in starred_keys
                 star_text = "Starred\n" if starred else ""
                 meta = star_text + str(file_name or name or "Saved result") + ("\n" + "  |  ".join(meta_parts) if meta_parts else "")
                 li = QListWidgetItem()
@@ -1778,7 +1997,7 @@ class Main(QWidget):
                 explorerb.setFixedWidth(70)
                 explorerb.setToolTip("Show this file in Explorer")
                 explorerb.clicked.connect(lambda checked=False, x=item: self.explorer_item(x))
-                starb = self.make_star_button(item)
+                starb = self.make_star_button(item, starred)
                 rh.addWidget(info_box, 1)
                 rh.addWidget(starb)
                 rh.addWidget(openb)
@@ -1929,7 +2148,7 @@ class Main(QWidget):
         if not q:
             self.update_compact_state()
             return
-        cached = self.history.search_results(q, self.current_history_filter())
+        cached = [item for item in self.history.search_results(q, self.current_history_filter()) if not self.is_visibility_hidden(item)]
         if cached:
             self.results = cached
             self.render_results(len(cached), 0, "Saved results")
@@ -1948,6 +2167,7 @@ class Main(QWidget):
         self.list.clear()
         query = self.search.text().strip()
         do_highlight = behavior_defaults(self.cfg)["highlight_matches"]
+        starred_keys = self.history.starred_keys()
         for item in self.results:
             path=QsirchClient.path(item)
             folder, file_name = result_display_parts(item, path)
@@ -1989,7 +2209,7 @@ class Main(QWidget):
             explorerb.setFixedWidth(70)
             explorerb.setToolTip("Show this file in Explorer")
             explorerb.clicked.connect(lambda checked=False, x=item: self.explorer_item(x))
-            starb=self.make_star_button(item)
+            starb=self.make_star_button(item, result_key(item) in starred_keys)
             rh.addWidget(info_box,1)
             rh.addWidget(starb)
             rh.addWidget(openb)
@@ -2012,8 +2232,9 @@ class Main(QWidget):
         if hasattr(self, "busy"):
             self.busy.hide()
         raw_items=data.get("items",[])
-        self.results=[item for item in raw_items if not self.is_excluded(item)]
-        self.history.add_results(self.results)
+        indexed_items=[item for item in raw_items if not self.is_excluded(item)]
+        self.results=[item for item in indexed_items if not self.is_visibility_hidden(item)]
+        self.history.add_results(indexed_items)
         self.update_history_filter_choices()
         server_total = data.get("total", len(raw_items))
         hidden = len(raw_items) - len(self.results)
