@@ -10,7 +10,8 @@
   "history": {
     "enabled": true,
     "file": "history.json",
-    "max_entries": 200
+    "max_entries": 200,
+    "source_filter": "__this__"
   },
   "behavior": {
     "show_in_taskbar": true,

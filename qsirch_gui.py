@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "Qsirch Floating Search"
-APP_VERSION = "v10.13"
+APP_VERSION = "v10.14"
 COMPACT_HEIGHT = 132
 UPSTREAM_REPO = "https://github.com/iios-co/qsirch"
 FORK_REPO = "https://github.com/senposage/qsirch-gui"
@@ -286,10 +286,12 @@ def path_matches_visibility_pattern(qpath, pattern):
 
 def history_defaults(cfg):
     raw = cfg.get("history", {}) or {}
+    source = str(raw.get("source_filter", raw.get("sourceFilter", "__this__")) or "__this__")
     return {
         "enabled": bool(raw.get("enabled", True)),
         "file": raw.get("file") or "history.json",
         "max_entries": int(raw.get("max_entries", raw.get("maxEntries", 200)) or 200),
+        "source_filter": source,
     }
 
 def behavior_defaults(cfg):
@@ -570,6 +572,14 @@ def main_stylesheet(cfg):
             background:#ffffff; color:#1f2328; border:1px solid #c9d1d9;
             border-radius:8px; font-size:13px; padding:4px;
         }
+        QFrame#sidebar {
+            background:#eef1f4; border:1px solid #c9d1d9; border-radius:8px;
+        }
+        QPushButton#navButton {
+            text-align:left; background:transparent; border:0; border-radius:6px;
+            padding:8px 9px; color:#24292f;
+        }
+        QPushButton#navButton:checked { background:#dbeafe; color:#0f172a; }
         QListWidget::item { padding:0; border-bottom:1px solid #d8dee4; }
         QListWidget::item:selected { background:#dbeafe; border-radius:6px; }
         QLabel { color:#24292f; }
@@ -610,6 +620,14 @@ def main_stylesheet(cfg):
             background:#191a1d; color:#e7e9eb; border:1px solid #303238;
             border-radius:8px; font-size:13px; padding:4px;
         }
+        QFrame#sidebar {
+            background:#17191c; border:1px solid #303238; border-radius:8px;
+        }
+        QPushButton#navButton {
+            text-align:left; background:transparent; border:0; border-radius:6px;
+            padding:8px 9px; color:#dce1e6;
+        }
+        QPushButton#navButton:checked { background:#26364d; color:#ffffff; }
         QListWidget::item { padding:0; border-bottom:1px solid #282a2e; }
         QListWidget::item:selected { background:#26364d; border-radius:6px; }
         QLabel { color:#dce1e6; }
@@ -805,6 +823,11 @@ class HistoryStore:
         if not self.enabled:
             return []
         self.load()
+        if mode == "__favorites__":
+            return [
+                x for x in self.entries
+                if bool(x.get("starred")) and (x.get("machineId") == self.machine_id or x.get("machine") == self.machine)
+            ]
         if mode == "__this__":
             return [x for x in self.entries if x.get("machine") == self.machine]
         if mode and mode not in ("__all__", "__this__"):
@@ -1180,6 +1203,15 @@ class Settings(QDialog):
         self.history_max = QSpinBox()
         self.history_max.setRange(1, 5000)
         self.history_max.setValue(hcfg["max_entries"])
+        self.history_source = QComboBox()
+        self.history_source.addItem("Favorites", "__favorites__")
+        self.history_source.addItem("This machine", "__this__")
+        self.history_source.addItem("All history", "__all__")
+        if parent and hasattr(parent, "history"):
+            for machine in parent.history.machines():
+                self.history_source.addItem(machine, machine)
+        source_idx = self.history_source.findData(hcfg["source_filter"])
+        self.history_source.setCurrentIndex(source_idx if source_idx >= 0 else 1)
         self.clear_history = QCheckBox("Clear this machine's history when saving")
         self.clear_starred_history = QCheckBox("Also clear starred results")
         self.clear_starred_history.setToolTip("Normally starred results stay saved when this machine's history is cleared.")
@@ -1190,6 +1222,7 @@ class Settings(QDialog):
         hf.addRow("", self.history_enabled)
         hf.addRow("History file", self.history_file)
         hf.addRow("Maximum entries", self.history_max)
+        hf.addRow("Default saved-results view", self.history_source)
         hf.addRow("", self.clear_history)
         hf.addRow("", self.clear_starred_history)
         hf.addRow("", clear_this_machine)
@@ -1499,6 +1532,7 @@ class Settings(QDialog):
                 "enabled": self.history_enabled.isChecked(),
                 "file": self.history_file.text().strip() or "history.json",
                 "max_entries": self.history_max.value(),
+                "source_filter": self.history_source.currentData() or "__this__",
                 "clear_on_save": self.clear_history.isChecked(),
                 "clear_starred_on_save": self.clear_starred_history.isChecked(),
             },
@@ -1529,6 +1563,9 @@ class Main(QWidget):
         self.behavior = behavior_defaults(self.cfg)
         self.show_in_taskbar = bool(self.behavior["show_in_taskbar"])
         self.preview_visible = False
+        self.filters_visible = False
+        self.history_view = history_defaults(self.cfg)["source_filter"]
+        self.nav_buttons = []
         self.hotkey_manager = HotkeyManager(self)
         self.hotkey_warning = ""
         self.apply_window_flags()
@@ -1576,7 +1613,7 @@ class Main(QWidget):
                     ]
                 },
                 "visibility_rules": [],
-                "history": {"enabled": True, "file": "history.json", "max_entries": 200},
+                "history": {"enabled": True, "file": "history.json", "max_entries": 200, "source_filter": "__this__"},
                 "behavior": {"show_in_taskbar": True, "global_hotkey": "Ctrl+Space", "theme": "system", "highlight_matches": True, "preview_pane": False, "standard_window": False, "allow_download": False, "folders_first": True},
                 "always_on_top": True
             }
@@ -1626,6 +1663,16 @@ class Main(QWidget):
         top.addWidget(self.pin_btn)
         self.update_pin_button()
 
+        self.filters_btn=QPushButton("Filters")
+        self.filters_btn.setObjectName("toolButton")
+        self.filters_btn.setToolTip("Show or hide search filters")
+        self.filters_btn.setCheckable(True)
+        self.filters_btn.setChecked(False)
+        self.filters_btn.setFixedWidth(68)
+        self.filters_btn.setMinimumHeight(36)
+        self.filters_btn.clicked.connect(self.toggle_filters)
+        top.addWidget(self.filters_btn)
+
         self.preview_btn=QPushButton("Preview")
         self.preview_btn.setObjectName("toolButton")
         self.preview_btn.setToolTip("Show or hide the preview pane")
@@ -1661,7 +1708,9 @@ class Main(QWidget):
         top.addWidget(self.exit_btn)
         v.addLayout(top)
 
-        filters=QHBoxLayout()
+        self.filters_widget = QWidget()
+        filters=QHBoxLayout(self.filters_widget)
+        filters.setContentsMargins(0, 0, 0, 0)
         filters.setSpacing(6)
         self.exact_match=QCheckBox("Exact")
         self.exact_match.setToolTip("Search as an exact phrase")
@@ -1724,7 +1773,8 @@ class Main(QWidget):
         self.similar_btn.clicked.connect(self.more_like_this)
         filters.addWidget(self.similar_btn)
         filters.addStretch()
-        v.addLayout(filters)
+        self.filters_widget.setVisible(False)
+        v.addWidget(self.filters_widget)
 
         self.status_bar_widget = QWidget()
         bar=QHBoxLayout(self.status_bar_widget)
@@ -1733,14 +1783,9 @@ class Main(QWidget):
         self.status.installEventFilter(self)
         self.count=QLabel("")
         self.count.installEventFilter(self)
-        self.history_filter = QComboBox()
-        self.history_filter.setToolTip("Filter search history")
-        self.history_filter.setMinimumWidth(160)
-        self.history_filter.currentIndexChanged.connect(self.refresh_history_view)
         bar.addWidget(self.status)
         bar.addStretch()
         bar.addWidget(self.count)
-        bar.addWidget(self.history_filter)
         v.addWidget(self.status_bar_widget)
 
         self.list=QListWidget()
@@ -1782,11 +1827,25 @@ class Main(QWidget):
         self.preview_text.setPlainText("Select a result to preview.")
         pp.addWidget(self.preview_text, 1)
 
+        self.sidebar = QFrame()
+        self.sidebar.setObjectName("sidebar")
+        self.sidebar_layout = QVBoxLayout(self.sidebar)
+        self.sidebar_layout.setContentsMargins(8, 8, 8, 8)
+        self.sidebar_layout.setSpacing(4)
+        self.refresh_sidebar()
+
+        self.results_splitter = QSplitter(Qt.Horizontal)
+        self.results_splitter.addWidget(self.list)
+        self.results_splitter.addWidget(self.preview_panel)
+        self.results_splitter.setStretchFactor(0, 3)
+        self.results_splitter.setStretchFactor(1, 2)
+
         self.content_splitter = QSplitter(Qt.Horizontal)
-        self.content_splitter.addWidget(self.list)
-        self.content_splitter.addWidget(self.preview_panel)
-        self.content_splitter.setStretchFactor(0, 3)
-        self.content_splitter.setStretchFactor(1, 2)
+        self.content_splitter.addWidget(self.sidebar)
+        self.content_splitter.addWidget(self.results_splitter)
+        self.content_splitter.setStretchFactor(0, 0)
+        self.content_splitter.setStretchFactor(1, 1)
+        self.content_splitter.setSizes([145, 675])
         self.preview_panel.setVisible(False)
         v.addWidget(self.content_splitter,1)
 
@@ -1865,6 +1924,54 @@ class Main(QWidget):
     def update_preview_button(self):
         if hasattr(self, "preview_btn"):
             self.preview_btn.setChecked(self.preview_visible)
+
+    def toggle_filters(self):
+        self.filters_visible = not self.filters_visible
+        if hasattr(self, "filters_widget"):
+            self.filters_widget.setVisible(self.filters_visible)
+        if hasattr(self, "filters_btn"):
+            self.filters_btn.setChecked(self.filters_visible)
+
+    def add_nav_button(self, text, mode):
+        button = QPushButton(text)
+        button.setObjectName("navButton")
+        button.setCheckable(True)
+        button.setChecked(mode == self.history_view)
+        button.clicked.connect(lambda checked=False, m=mode: self.set_history_view(m))
+        self.sidebar_layout.addWidget(button)
+        self.nav_buttons.append((button, mode))
+
+    def refresh_sidebar(self):
+        if not hasattr(self, "sidebar_layout"):
+            return
+        while self.sidebar_layout.count():
+            item = self.sidebar_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+        self.nav_buttons = []
+        self.add_nav_button("Favorites", "__favorites__")
+        self.add_nav_button("This machine", "__this__")
+        self.add_nav_button("All history", "__all__")
+        for machine in self.history.machines():
+            self.add_nav_button(machine, machine)
+        self.sidebar_layout.addStretch()
+        settings_button = QPushButton("Settings")
+        settings_button.setObjectName("navButton")
+        settings_button.clicked.connect(self.settings)
+        self.sidebar_layout.addWidget(settings_button)
+
+    def update_nav_selection(self):
+        for button, mode in getattr(self, "nav_buttons", []):
+            button.setChecked(mode == self.history_view)
+
+    def set_history_view(self, mode):
+        self.history_view = mode or "__this__"
+        self.cfg.setdefault("history", {})["source_filter"] = self.history_view
+        self.save()
+        self.update_nav_selection()
+        if not self.search.text().strip():
+            self.refresh_history_view()
 
     def set_preview_visible(self, visible, persist=True):
         self.preview_visible = bool(visible)
@@ -2146,25 +2253,13 @@ class Main(QWidget):
         return bool(getattr(self, "history", None) and self.history.filtered(self.current_history_filter()))
 
     def current_history_filter(self):
-        if not hasattr(self, "history_filter"):
-            return "__this__"
-        if self.history_filter.count() == 0:
-            return "__this__"
-        return self.history_filter.currentData() or "__this__"
+        return getattr(self, "history_view", history_defaults(self.cfg)["source_filter"]) or "__this__"
 
     def update_history_filter_choices(self):
-        if not hasattr(self, "history_filter"):
-            return
         current = self.current_history_filter()
-        self.history_filter.blockSignals(True)
-        self.history_filter.clear()
-        self.history_filter.addItem("This machine", "__this__")
-        self.history_filter.addItem("All history", "__all__")
-        for machine in self.history.machines():
-            self.history_filter.addItem(machine, machine)
-        idx = self.history_filter.findData(current)
-        self.history_filter.setCurrentIndex(idx if idx >= 0 else 0)
-        self.history_filter.blockSignals(False)
+        self.refresh_sidebar()
+        self.history_view = current
+        self.update_nav_selection()
 
     def is_visibility_hidden(self, item):
         rules = visibility_rules(self.cfg)
@@ -2188,6 +2283,13 @@ class Main(QWidget):
         return "allow" not in best_actions
 
     def add_sized_row(self, item, row, minimum_height=58):
+        def select_row(event, list_item=item):
+            self.list.setCurrentItem(list_item)
+        def open_row(event, list_item=item):
+            self.list.setCurrentItem(list_item)
+            self.open_item(list_item)
+        row.mousePressEvent = select_row
+        row.mouseDoubleClickEvent = open_row
         row.setMinimumHeight(minimum_height)
         row.adjustSize()
         height = max(minimum_height, row.sizeHint().height())
@@ -2341,9 +2443,11 @@ class Main(QWidget):
             self.client=None
             self.apply_behavior()
             self.history.configure(self.cfg)
+            self.history_view = history_defaults(self.cfg)["source_filter"]
             if clear_history:
                 self.history.clear_current_machine(clear_starred)
             self.history.load()
+            self.refresh_sidebar()
             self.refresh_history_view()
             if self.hotkey_warning:
                 QMessageBox.warning(self, "Shortcut unavailable", self.hotkey_warning)

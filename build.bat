@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
-echo Building Qsirch Floating Search v10.13...
+echo Building Qsirch Floating Search v10.14...
 echo.
 
 if not exist "config.json" (
@@ -42,5 +42,5 @@ echo SUCCESS
 echo   dist\QsirchFloating\QsirchFloating.exe
 echo   dist\QsirchFloating\config.json
 echo.
-echo The running UI should visibly show v10.13.
+echo The running UI should visibly show v10.14.
 pause
