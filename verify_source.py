@@ -1,15 +1,14 @@
 from pathlib import Path
 s = Path("qsirch_gui.py").read_text(encoding="utf-8")
 required = [
-    'APP_VERSION = "v10.12"',
+    'APP_VERSION = "v10.13"',
     'COMPACT_HEIGHT = 132',
     'self.hint=QLabel(',
     'hasattr(self, "hint")',
     'self.tabs.addTab(conn, "Connection")',
     'self.tabs.addTab(behavior, "Appearance / Behavior")',
     'self.tabs.addTab(paths, "Path Mapping")',
-    'self.tabs.addTab(excl, "Exclusions")',
-    'self.tabs.addTab(visible, "Visibility")',
+    'self.tabs.addTab(rules_tab, "Rules")',
     'self.tabs.addTab(hist, "History")',
     'class HistoryStore:',
     'class HotkeyManager:',
@@ -29,6 +28,15 @@ required = [
     'openb = QPushButton("Open")',
     'self.preview_btn=QPushButton("Preview")',
     'client.thumbnail(preview_item)',
+    'def similar(self, item_id',
+    'def more_like_this(self):',
+    'def parse_search_text',
+    'def client_filter_items',
+    'self.exact_match=QCheckBox("Exact")',
+    'self.standard_window = QCheckBox("Use standard resizable Windows frame")',
+    'self.allow_download = QCheckBox("Show Download button")',
+    'QTextEdit#previewText',
+    'pop_preview = QPushButton("Pop Out")',
     'clear_current_machine(self.clear_starred_history.isChecked())',
     'button.setText("★" if starred else "☆")',
     'visibility_rules',
@@ -44,4 +52,4 @@ required = [
 missing = [x for x in required if x not in s]
 if missing:
     raise SystemExit("Missing required v10 source markers: " + repr(missing))
-print("v10.12 source verification passed.")
+print("v10.13 source verification passed.")
