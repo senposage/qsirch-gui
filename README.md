@@ -1,4 +1,37 @@
-# Qsirch CLI
+# Qsirch GUI and CLI
+
+This repo now includes two entry points:
+
+- `qsirch_gui.py` - Windows floating search app for Qsirch, with tray behavior, result history, mapped-drive opening, configurable global hotkey, taskbar toggle, and editable exclusions.
+- `qsirch.py` - original Python command-line client for the QNAP Qsirch 7 REST API.
+
+## Windows Floating App
+
+Run from source:
+
+```bash
+pip install -r requirements.txt
+python qsirch_gui.py
+```
+
+Build the portable Windows folder:
+
+```bat
+build.bat
+```
+
+Expected build output:
+
+```text
+dist\QsirchFloating\QsirchFloating.exe
+dist\QsirchFloating\config.json
+```
+
+Deploy the whole `dist\QsirchFloating` folder to the share. The app keeps `config.json` and shared result history beside the EXE.
+
+See `QsirchFloating-README.txt` for the GUI-specific notes.
+
+## Qsirch CLI
 
 A Python command-line client for the **QNAP Qsirch 7 REST API**. Search emails, documents, and files indexed on your QNAP NAS directly from the terminal or integrate into automated workflows.
 

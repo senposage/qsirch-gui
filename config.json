@@ -1,0 +1,48 @@
+{
+  "host": "192.168.1.10",
+  "port": 8080,
+  "ssl": false,
+  "user": "YOUR_USERNAME",
+  "password": "YOUR_PASSWORD",
+  "path_mappings": [],
+  "history": {
+    "enabled": true,
+    "file": "history.json",
+    "max_entries": 200
+  },
+  "behavior": {
+    "show_in_taskbar": true,
+    "global_hotkey": "Ctrl+Space"
+  },
+  "always_on_top": true,
+  "exclude": {
+    "folders": [
+      "@Recently-Snapshot",
+      "@Recently-Snapshot\\*",
+      "@Recycle",
+      "@Recycle\\*",
+      "@recycle",
+      "@recycle\\*",
+      "#recycle",
+      "#recycle\\*",
+      ".sync",
+      ".sync\\*",
+      ".qsync",
+      ".qsync\\*",
+      ".qsync_sn",
+      ".qsync_sn\\*"
+    ],
+    "files": [
+      "Thumbs.db",
+      "desktop.ini",
+      "*.tmp",
+      "~$*",
+      ".DS_Store",
+      "*.qsync",
+      "*.qsync_tmp",
+      "*.syncing",
+      "*_conflict_*",
+      "*conflicted copy*"
+    ]
+  }
+}
