@@ -1,4 +1,4 @@
-import sys, os, base64, json, webbrowser, fnmatch, subprocess, socket, uuid, tempfile, ctypes, html, re
+import sys, os, base64, json, webbrowser, fnmatch, subprocess, socket, uuid, tempfile, ctypes, html, re, mimetypes
 from ctypes import wintypes
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -17,13 +17,20 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "Qsirch Floating Search"
-APP_VERSION = "v10.16"
+APP_VERSION = "v10.17"
 COMPACT_HEIGHT = 132
 UPSTREAM_REPO = "https://github.com/iios-co/qsirch"
 FORK_REPO = "https://github.com/senposage/qsirch-gui"
 DONATION_URL = "https://www.paypal.com/donate?business=rjc862003%40gmail.com&currency_code=USD"
 BASE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 CONFIG = BASE_DIR / "config.json"
+TEXT_PREVIEW_EXTS = {
+    "txt", "md", "csv", "tsv", "log", "json", "xml", "html", "htm", "css",
+    "js", "ts", "py", "ps1", "bat", "cmd", "ini", "cfg", "conf", "yml",
+    "yaml", "sql", "rtf"
+}
+IMAGE_PREVIEW_EXTS = {"jpg", "jpeg", "png", "gif", "bmp", "webp", "tif", "tiff"}
+MAX_TEXT_PREVIEW_BYTES = 512 * 1024
 
 WM_HOTKEY = 0x0312
 HOTKEY_ID = 0x5153
@@ -396,6 +403,13 @@ def display_path(path, max_line=92):
     if current:
         lines.append(current)
     return "\n".join(lines)
+
+def display_folder_path(path):
+    text = str(path or "").replace("/", "\\").strip("\\")
+    parts = [x for x in text.split("\\") if x]
+    if parts and parts[0].casefold() == "shared":
+        text = "\\".join(parts[1:])
+    return display_path(text or path)
 
 def result_display_parts(item, fallback_path=""):
     name = str(item.get("name", "") or "")
@@ -2032,22 +2046,11 @@ class Main(QWidget):
         self.preview_pixmap = None
         self.preview_image.clear()
         self.preview_text.setPlainText("Loading preview...")
-        if not all((self.cfg.get("host"), self.cfg.get("user"), self.cfg.get("password"))):
-            self.preview_text.setPlainText("Configure the QNAP connection to load previews.")
-            return
         self.preview_request_id += 1
         request_id = self.preview_request_id
 
         def fn(preview_item, rid):
-            client = self.ensure_client()
-            thumb = client.thumbnail(preview_item)
-            summary = ""
-            try:
-                summary = preview_summary(client.preview(preview_item))
-            except Exception as e:
-                if not thumb:
-                    summary = str(e)
-            return {"request_id": rid, "thumbnail": thumb, "summary": summary}
+            return self.build_preview_data(preview_item, rid)
 
         worker = Worker(fn, item, request_id)
         self.preview_workers.append(worker)
@@ -2057,11 +2060,87 @@ class Main(QWidget):
         worker.finished.connect(lambda w=worker: self.preview_workers.remove(w) if w in self.preview_workers else None)
         worker.start()
 
+    def build_preview_data(self, preview_item, request_id):
+        local = self.local_file_preview(preview_item)
+        thumb = None
+        summary = local.get("summary", "")
+        if not local.get("image_path") and all((self.cfg.get("host"), self.cfg.get("user"), self.cfg.get("password"))):
+            client = self.ensure_client()
+            try:
+                thumb = client.thumbnail(preview_item)
+            except Exception as e:
+                if not summary:
+                    summary = str(e)
+            if not summary:
+                try:
+                    summary = preview_summary(client.preview(preview_item))
+                except Exception as e:
+                    summary = str(e)
+        if not summary and not all((self.cfg.get("host"), self.cfg.get("user"), self.cfg.get("password"))):
+            summary = "Configure the QNAP connection, or add a path mapping to preview the local file."
+        return {
+            "request_id": request_id,
+            "thumbnail": thumb,
+            "image_path": local.get("image_path", ""),
+            "summary": summary,
+        }
+
+    def local_file_preview(self, item):
+        try:
+            path = Path(self.resolve_mapped_path(item))
+        except Exception:
+            return {"summary": ""}
+        if not path.exists():
+            return {"summary": f"Mapped file was not found:\n{path}"}
+        if path.is_dir():
+            try:
+                names = []
+                for idx, child in enumerate(path.iterdir()):
+                    if idx >= 200:
+                        break
+                    names.append(child.name)
+                names.sort()
+                body = "\n".join(names)
+                more = "\n..." if len(names) >= 200 else ""
+                return {"summary": f"Folder: {path}\n\n{body}{more}"}
+            except Exception as e:
+                return {"summary": f"Folder: {path}\n\n{e}"}
+
+        ext = path.suffix.lower().lstrip(".")
+        mime, _ = mimetypes.guess_type(str(path))
+        size = path.stat().st_size
+        header = f"{path.name}\n{path}\n{size:,} bytes"
+        if ext in IMAGE_PREVIEW_EXTS or str(mime or "").startswith("image/"):
+            return {"image_path": str(path), "summary": header}
+        if ext in TEXT_PREVIEW_EXTS or str(mime or "").startswith("text/"):
+            raw = path.read_bytes()[:MAX_TEXT_PREVIEW_BYTES]
+            text = None
+            for encoding in ("utf-8-sig", "utf-16", "cp1252", "latin-1"):
+                try:
+                    text = raw.decode(encoding)
+                    break
+                except UnicodeDecodeError:
+                    pass
+            if text is None:
+                return {"summary": header + "\n\nText preview unavailable."}
+            text = text.replace("\x00", "")
+            truncated = "\n\n[Preview truncated]" if size > MAX_TEXT_PREVIEW_BYTES else ""
+            return {"summary": header + "\n\n" + text + truncated}
+        return {"summary": header + "\n\nNo local text preview is available for this file type."}
+
     def preview_loaded(self, data):
         if not isinstance(data, dict) or data.get("request_id") != self.preview_request_id:
             return
         thumb = data.get("thumbnail")
-        if isinstance(thumb, dict) and thumb.get("content"):
+        image_path = data.get("image_path")
+        if image_path:
+            pix = QPixmap(image_path)
+            if not pix.isNull():
+                self.preview_pixmap = pix
+                self.scale_preview_image()
+            else:
+                self.preview_image.setText("Preview unavailable")
+        elif isinstance(thumb, dict) and thumb.get("content"):
             pix = QPixmap()
             if pix.loadFromData(thumb["content"]):
                 self.preview_pixmap = pix
@@ -2319,7 +2398,11 @@ class Main(QWidget):
                 used = entry.get("lastUsed", "")
                 meta_parts = [x for x in (machine, ip, used) if x]
                 starred = result_key(item) in starred_keys
-                meta = str(file_name or name or "Saved result") + ("\n" + "  |  ".join(meta_parts) if meta_parts else "")
+                meta = str(file_name or name or "Saved result")
+                if meta_parts:
+                    meta += "\n" + "  |  ".join(meta_parts)
+                if path:
+                    meta += "\n" + display_path(path)
                 li = QListWidgetItem()
                 li.setData(Qt.UserRole, {"_history": True, "item": item})
                 row = QWidget()
@@ -2330,7 +2413,7 @@ class Main(QWidget):
                 iv = QVBoxLayout(info_box)
                 iv.setContentsMargins(0, 0, 0, 0)
                 iv.setSpacing(3)
-                title = QLabel(display_path(folder))
+                title = QLabel(display_folder_path(folder))
                 title.setObjectName("folderPath")
                 title.setTextInteractionFlags(Qt.TextSelectableByMouse)
                 title.setWordWrap(True)
@@ -2585,12 +2668,14 @@ class Main(QWidget):
             title=QLabel()
             title.setObjectName("folderPath")
             title.setTextFormat(Qt.RichText)
-            title.setText(highlight_text(display_path(folder), query, do_highlight))
+            title.setText(highlight_text(display_folder_path(folder), query, do_highlight))
             title.setTextInteractionFlags(Qt.TextSelectableByMouse)
             title.setWordWrap(True)
             detail_text = str(file_name)
             if size:
                 detail_text += f"\n{size}"
+            if path:
+                detail_text += f"\n{display_path(path)}"
             detail=QLabel()
             detail.setObjectName("fileName")
             detail.setTextFormat(Qt.RichText)
