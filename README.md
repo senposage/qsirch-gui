@@ -3,6 +3,7 @@
 This repo now includes two entry points:
 
 - `qsirch_gui.py` - Windows floating search app for Qsirch, with tray behavior, result history, mapped-drive opening, configurable global hotkey, taskbar toggle, and editable exclusions.
+- `src\PyQsirchgui.Windows` - native WPF Windows shell for the Explorer-like UI migration.
 - `qsirch.py` - original Python command-line client for the QNAP Qsirch 7 REST API.
 
 ## Windows App
@@ -30,6 +31,27 @@ dist\PyQsirchgui\config.json
 Deploy the whole `dist\PyQsirchgui` folder to the share. The app keeps `config.json` and shared result history beside the EXE.
 
 See `PyQsirchgui-README.txt` for the GUI-specific notes.
+
+## Native Windows UI
+
+The WPF migration lives in `src\PyQsirchgui.Windows`.
+
+The native app is intended to become the Explorer-like UI:
+
+- top search box with plain file type filter
+- Explorer view modes: Large icons, Small icons, List, Details
+- folders bucketed above files
+- left Favorites quick-launch list
+- Open uses the Windows default app
+- Show selects the file in Explorer
+
+Build it with:
+
+```bat
+native-build.bat
+```
+
+The WPF app reads the same `config.json` and existing `history.json` format while the migration is in progress.
 
 ## Qsirch CLI
 
