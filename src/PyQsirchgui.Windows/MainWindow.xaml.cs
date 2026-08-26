@@ -59,7 +59,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         new() { Name = "Excel", Extensions = ["xls", "xlsx", "xlsm", "xlsb", "csv"] },
         new() { Name = "PowerPoint", Extensions = ["ppt", "pptx", "pptm", "pps", "ppsx"] },
         new() { Name = "PDF", Extensions = ["pdf"] },
+        new() { Name = "OneNote", Extensions = ["one"] },
         new() { Name = "Email", Category = "Email", Extensions = ["eml", "msg"] },
+        new() { Name = "Text", Extensions = ["txt", "md", "log", "ini", "cfg"] },
         new() { Name = "Images", Extensions = ["jpg", "jpeg", "png", "gif", "bmp", "webp", "tif", "tiff"] },
         new() { Name = "Videos", Extensions = ["mp4", "mov", "mkv", "avi", "wmv", "m4v"] },
         new() { Name = "Music", Extensions = ["mp3", "wav", "flac", "m4a", "aac", "wma"] },
@@ -153,6 +155,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             return;
         }
+        var serverQuery = query == "*" ? "." : query;
 
         _searchCts?.Cancel();
         _searchCts = new CancellationTokenSource();
@@ -165,21 +168,27 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             var cached = _history.SearchResults(query, _config.History.SourceFilter)
                 .Where(result => !_rules.IsHidden(result))
                 .ToList();
+            var showedCached = false;
             if (cached.Count > 0)
             {
                 ReplaceResults(cached);
-                StatusText = "Saved results";
-                return;
+                StatusText = "Saved results; checking NAS...";
+                showedCached = true;
             }
 
             using var client = new QsirchClient(_config);
             var typeFilter = SelectedTypeFilter();
-            var results = await client.SearchAsync(query, typeFilter, _searchCts.Token);
+            var results = await client.SearchAsync(serverQuery, typeFilter, _searchCts.Token);
+            if (showedCached && results.Count == 0)
+            {
+                StatusText = "Saved results; NAS returned none";
+                return;
+            }
             var visible = results.Where(result => !_rules.IsHidden(result)).ToList();
             _history.AddResults(results);
             ReplaceResults(visible);
             LoadFavorites();
-            StatusText = "Ready";
+            StatusText = visible.Count == 0 && results.Count > 0 ? "No visible results" : "Ready";
         }
         catch (OperationCanceledException)
         {

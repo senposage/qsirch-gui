@@ -21,11 +21,12 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
         }
 
         await LoginAsync(cancellationToken);
-        var url = $"{_baseUrl}/qsirch/latest/api/search?q={Uri.EscapeDataString(query)}&limit=100&offset=0&advanced_mode=0";
+        const int limit = 500;
+        var url = $"{_baseUrl}/qsirch/latest/api/search?q={Uri.EscapeDataString(query)}&limit={limit}&offset=0&advanced_mode=0";
         using var request = new HttpRequestMessage(typeFilter.Category.Equals("All", StringComparison.OrdinalIgnoreCase) ? HttpMethod.Get : HttpMethod.Post, url);
         if (!typeFilter.Category.Equals("All", StringComparison.OrdinalIgnoreCase))
         {
-            request.Content = new StringContent(JsonSerializer.Serialize(new { tools = typeFilter.Category, limit = 100 }), Encoding.UTF8, "application/json");
+            request.Content = new StringContent(JsonSerializer.Serialize(new { tools = typeFilter.Category, limit }), Encoding.UTF8, "application/json");
         }
 
         using var response = await _http.SendAsync(request, cancellationToken);
