@@ -32,6 +32,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private string _sortColumn = "name";
     private bool _sortDescending;
     private CancellationTokenSource? _searchCts;
+    private CancellationTokenSource? _paintCts;
 
     public MainWindow()
     {
@@ -172,7 +173,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             var showedCached = false;
             if (cached.Count > 0)
             {
-                ReplaceResults(cached);
+                await ReplaceResultsAsync(cached, _searchCts.Token, "Saved results");
                 StatusText = "Saved results; checking NAS...";
                 showedCached = true;
             }
@@ -187,7 +188,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
             var visible = await Task.Run(() => results.Where(result => !_rules.IsHidden(result)).ToList());
             await Task.Run(() => _history.AddResults(results));
-            ReplaceResults(visible);
+            await ReplaceResultsAsync(visible, _searchCts.Token, "Painting results");
             LoadFavorites();
             StatusText = visible.Count == 0 && results.Count > 0 ? "No visible results" : "Ready";
         }
@@ -205,9 +206,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private void TypeChanged(object sender, SelectionChangedEventArgs e)
+    private async void TypeChanged(object sender, SelectionChangedEventArgs e)
     {
-        ApplyLocalFilters();
+        await ApplyLocalFiltersAsync("Filtering results");
     }
 
     private void ViewChanged(object sender, SelectionChangedEventArgs e)
@@ -220,7 +221,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private void DetailsHeaderClicked(object sender, RoutedEventArgs e)
+    private async void DetailsHeaderClicked(object sender, RoutedEventArgs e)
     {
         if (sender is not GridViewColumnHeader header || header.Tag is not string column)
         {
@@ -235,7 +236,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _sortColumn = column;
             _sortDescending = false;
         }
-        ApplyLocalFilters();
+        await ApplyLocalFiltersAsync("Sorting results");
         StatusText = $"Sorted by {header.Content}{(_sortDescending ? " descending" : "")}";
     }
 
@@ -427,7 +428,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         LoadFavorites();
         ViewBox.SelectedItem = ViewModes.FirstOrDefault(x => x.Key.Equals(_config.Behavior.ResultView, StringComparison.OrdinalIgnoreCase)) ?? ViewModes[^1];
         ApplyViewMode();
-        ApplyLocalFilters();
+        _ = ApplyLocalFiltersAsync("Filtering results");
         ApplyBehavior();
         AlwaysOnTopToggle.IsChecked = _config.AlwaysOnTop;
         StatusText = "Settings saved";
@@ -457,12 +458,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             : ExplorerList.SelectedItem as SearchResult;
     }
 
+    private async Task ApplyLocalFiltersAsync(string statusText)
+    {
+        var typeFilter = SelectedTypeFilter();
+        var snapshot = _allResults.ToList();
+        var filtered = await Task.Run(() => snapshot.Where(result => MatchesType(result, typeFilter)).ToList());
+        await PaintVisibleResultsAsync(filtered, NextPaintToken(), statusText);
+    }
+
     private void ApplyLocalFilters()
     {
         var typeFilter = SelectedTypeFilter();
-        var filtered = _allResults.Where(result =>
-            typeFilter.Extensions.Length == 0 ||
-            typeFilter.Extensions.Contains(result.Extension, StringComparer.OrdinalIgnoreCase));
+        var filtered = _allResults.Where(result => MatchesType(result, typeFilter));
         VisibleResults.Clear();
         foreach (var result in SortResults(filtered))
         {
@@ -471,16 +478,84 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         CountText = VisibleResults.Count == 0 ? "" : $"{VisibleResults.Count:n0} result{(VisibleResults.Count == 1 ? "" : "s")}";
     }
 
-    private void ReplaceResults(IEnumerable<SearchResult> results)
+    private async Task ReplaceResultsAsync(IEnumerable<SearchResult> results, CancellationToken token, string statusText)
     {
-        var starred = _history.StarredKeys();
+        var starred = await Task.Run(_history.StarredKeys, token);
+        var sorted = await Task.Run(() => SortResults(results).ToList(), token);
+        var typeFilter = SelectedTypeFilter();
+        var paintToken = NextPaintToken(token);
         _allResults.Clear();
-        foreach (var result in SortResults(results))
+        VisibleResults.Clear();
+        CountText = "";
+        StatusText = statusText;
+
+        foreach (var batch in Batches(sorted, 10))
         {
-            result.IsFavorite = starred.Contains(HistoryStore.ResultKey(result));
-            _allResults.Add(result);
+            paintToken.ThrowIfCancellationRequested();
+            foreach (var result in batch)
+            {
+                result.IsFavorite = starred.Contains(HistoryStore.ResultKey(result));
+                _allResults.Add(result);
+                if (MatchesType(result, typeFilter))
+                {
+                    VisibleResults.Add(result);
+                }
+            }
+            CountText = VisibleResults.Count == 0 ? "" : $"{VisibleResults.Count:n0} result{(VisibleResults.Count == 1 ? "" : "s")}";
+            DetailsList.Items.Refresh();
+            ExplorerList.Items.Refresh();
+            await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
         }
-        ApplyLocalFilters();
+        StatusText = "Ready";
+    }
+
+    private async Task PaintVisibleResultsAsync(IEnumerable<SearchResult> results, CancellationToken token, string statusText)
+    {
+        var sorted = await Task.Run(() => SortResults(results).ToList(), token);
+        VisibleResults.Clear();
+        CountText = "";
+        StatusText = statusText;
+        foreach (var batch in Batches(sorted, 10))
+        {
+            token.ThrowIfCancellationRequested();
+            foreach (var result in batch)
+            {
+                VisibleResults.Add(result);
+            }
+            CountText = VisibleResults.Count == 0 ? "" : $"{VisibleResults.Count:n0} result{(VisibleResults.Count == 1 ? "" : "s")}";
+            DetailsList.Items.Refresh();
+            ExplorerList.Items.Refresh();
+            await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+        }
+        StatusText = "Ready";
+    }
+
+    private CancellationToken NextPaintToken(CancellationToken outerToken = default)
+    {
+        _paintCts?.Cancel();
+        _paintCts = outerToken.CanBeCanceled
+            ? CancellationTokenSource.CreateLinkedTokenSource(outerToken)
+            : new CancellationTokenSource();
+        return _paintCts.Token;
+    }
+
+    private static bool MatchesType(SearchResult result, FileTypeFilter typeFilter)
+    {
+        return typeFilter.Extensions.Length == 0 ||
+               typeFilter.Extensions.Contains(result.Extension, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static IEnumerable<IReadOnlyList<T>> Batches<T>(IReadOnlyList<T> items, int size)
+    {
+        for (var i = 0; i < items.Count; i += size)
+        {
+            var batch = new List<T>(Math.Min(size, items.Count - i));
+            for (var j = i; j < items.Count && j < i + size; j++)
+            {
+                batch.Add(items[j]);
+            }
+            yield return batch;
+        }
     }
 
     private IEnumerable<SearchResult> SortResults(IEnumerable<SearchResult> results)
