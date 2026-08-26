@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "Qsirch Floating Search"
-APP_VERSION = "v10.17"
+APP_VERSION = "v10.18"
 COMPACT_HEIGHT = 132
 UPSTREAM_REPO = "https://github.com/iios-co/qsirch"
 FORK_REPO = "https://github.com/senposage/qsirch-gui"
@@ -2364,6 +2364,9 @@ class Main(QWidget):
             self.open_item(list_item)
         row.mousePressEvent = select_row
         row.mouseDoubleClickEvent = open_row
+        for child in row.findChildren(QWidget):
+            if not isinstance(child, QPushButton):
+                child.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         row.setMinimumHeight(minimum_height)
         row.adjustSize()
         height = max(minimum_height, row.sizeHint().height())

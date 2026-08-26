@@ -1,7 +1,7 @@
 from pathlib import Path
 s = Path("qsirch_gui.py").read_text(encoding="utf-8")
 required = [
-    'APP_VERSION = "v10.17"',
+    'APP_VERSION = "v10.18"',
     'COMPACT_HEIGHT = 132',
     'self.hint=QLabel(',
     'hasattr(self, "hint")',
@@ -54,6 +54,7 @@ required = [
     '#cardStandard',
     '"source_filter": "__this__"',
     'row.mouseDoubleClickEvent = open_row',
+    'child.setAttribute(Qt.WA_TransparentForMouseEvents, True)',
     'clear_current_machine(self.clear_starred_history.isChecked())',
     'button.setText("★" if starred else "☆")',
     'visibility_rules',
@@ -69,4 +70,4 @@ required = [
 missing = [x for x in required if x not in s]
 if missing:
     raise SystemExit("Missing required v10 source markers: " + repr(missing))
-print("v10.17 source verification passed.")
+print("v10.18 source verification passed.")
