@@ -1,7 +1,7 @@
 from pathlib import Path
 s = Path("qsirch_gui.py").read_text(encoding="utf-8")
 required = [
-    'APP_VERSION = "v10.9"',
+    'APP_VERSION = "v10.10"',
     'COMPACT_HEIGHT = 132',
     'self.hint=QLabel(',
     'hasattr(self, "hint")',
@@ -26,6 +26,11 @@ required = [
     'HTTPS port changed to 443',
     'HTTPS certificate verification turned off',
     'openb = QPushButton("Open")',
+    'self.preview_btn=QPushButton("Preview")',
+    'client.thumbnail(preview_item)',
+    'clear_current_machine(self.clear_starred_history.isChecked())',
+    'button.setText("Starred" if starred else "Star")',
+    '"preview_pane": False',
     'display_path',
     'QSystemTrayIcon',
     'setSizeHint',
@@ -33,4 +38,4 @@ required = [
 missing = [x for x in required if x not in s]
 if missing:
     raise SystemExit("Missing required v10 source markers: " + repr(missing))
-print("v10.9 source verification passed.")
+print("v10.10 source verification passed.")

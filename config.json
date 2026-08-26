@@ -15,7 +15,8 @@
     "show_in_taskbar": true,
     "global_hotkey": "Ctrl+Space",
     "theme": "system",
-    "highlight_matches": true
+    "highlight_matches": true,
+    "preview_pane": false
   },
   "always_on_top": true,
   "exclude": {

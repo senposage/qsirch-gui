@@ -6,17 +6,17 @@ from datetime import datetime
 import requests
 
 from PySide6.QtCore import Qt, QThread, Signal, QUrl, QSize, QTimer, QEvent
-from PySide6.QtGui import QIcon, QDesktopServices, QKeySequence
+from PySide6.QtGui import QIcon, QDesktopServices, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QWidget, QLineEdit, QListWidget, QListWidgetItem, QLabel,
     QVBoxLayout, QHBoxLayout, QPushButton, QFrame, QDialog, QFormLayout,
     QSpinBox, QCheckBox, QFileDialog, QMessageBox, QMenu, QAbstractItemView,
     QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
-    QComboBox, QSystemTrayIcon, QStyle, QProgressBar
+    QComboBox, QSystemTrayIcon, QStyle, QProgressBar, QSplitter
 )
 
 APP_NAME = "Qsirch Floating Search"
-APP_VERSION = "v10.9"
+APP_VERSION = "v10.10"
 COMPACT_HEIGHT = 132
 UPSTREAM_REPO = "https://github.com/iios-co/qsirch"
 FORK_REPO = "https://github.com/senposage/qsirch-gui"
@@ -85,8 +85,15 @@ class QsirchClient:
         self.s.cookies.set("NAS_SID", sid)
 
     def request(self, method, path, **kw):
+        timeout = kw.pop("timeout", 15)
+        if str(path).lower().startswith(("http://", "https://")):
+            url = path
+        elif str(path).startswith("/"):
+            url = self.base + path
+        else:
+            url = self.base + "/" + str(path)
         try:
-            r = self.s.request(method, self.base + path, timeout=15, verify=self.verify_ssl, **kw)
+            r = self.s.request(method, url, timeout=timeout, verify=self.verify_ssl, **kw)
         except requests.exceptions.RequestException as e:
             raise RuntimeError(self.connection_error_message(e))
         if r.status_code == 401:
@@ -94,7 +101,7 @@ class QsirchClient:
                 if r.json().get("error", {}).get("code") == 101:
                     self.login(self.user, self.pw)
                     try:
-                        r = self.s.request(method, self.base + path, timeout=15, verify=self.verify_ssl, **kw)
+                        r = self.s.request(method, url, timeout=timeout, verify=self.verify_ssl, **kw)
                     except requests.exceptions.RequestException as e:
                         raise RuntimeError(self.connection_error_message(e))
             except RuntimeError:
@@ -158,6 +165,16 @@ class QsirchClient:
             raise RuntimeError("No preview action supplied")
         return self.request("GET", action, timeout=30).json()
 
+    def thumbnail(self, item):
+        action = item.get("actions", {}).get("thumbnail")
+        if not action:
+            return None
+        r = self.request("GET", action, timeout=30)
+        return {
+            "content": r.content,
+            "content_type": r.headers.get("content-type", ""),
+        }
+
 class Worker(QThread):
     done = Signal(object)
     fail = Signal(str)
@@ -205,6 +222,7 @@ def behavior_defaults(cfg):
         "global_hotkey": str(raw.get("global_hotkey", raw.get("globalHotkey", "Ctrl+Space")) or "Ctrl+Space"),
         "theme": theme,
         "highlight_matches": bool(raw.get("highlight_matches", raw.get("highlightMatches", True))),
+        "preview_pane": bool(raw.get("preview_pane", raw.get("previewPane", False))),
     }
 
 def windows_prefers_dark():
@@ -306,6 +324,12 @@ def result_display_parts(item, fallback_path=""):
         folder = folder[:-len(file_name)].rstrip("\\/")
     return folder, file_name or full_path
 
+def result_key(item):
+    path = str(QsirchClient.path(item) or "").casefold()
+    name = str(item.get("name", "") or "").casefold()
+    ext = str(item.get("extension", "") or "").casefold()
+    return path, name, ext
+
 def highlight_text(text, query, enabled):
     text = str(text or "")
     if not enabled:
@@ -325,6 +349,31 @@ def highlight_text(text, query, enabled):
         pos = match.end()
     pieces.append(html.escape(text[pos:]))
     return "".join(pieces).replace("\n", "<br>")
+
+def preview_summary(data):
+    if not isinstance(data, dict):
+        return ""
+    lines = []
+    container = data.get("container_type") or data.get("type")
+    if container:
+        lines.append(f"Preview type: {container}")
+    for key in ("title", "subject", "from", "to", "date", "modified", "created"):
+        value = data.get(key)
+        if value:
+            lines.append(f"{key[:1].upper() + key[1:]}: {value}")
+    html_body = str(data.get("html") or "")
+    text_body = str(data.get("text") or data.get("content") or "")
+    body = re.sub(r"<[^>]+>", " ", html_body) if html_body else text_body
+    body = re.sub(r"\s+", " ", body).strip()
+    if body:
+        lines.append("")
+        lines.append(body[:1800])
+    info = data.get("info")
+    if isinstance(info, list):
+        for entry in info[:12]:
+            if isinstance(entry, dict) and entry.get("key") and entry.get("value"):
+                lines.append(f"{entry.get('key')}: {entry.get('value')}")
+    return "\n".join(lines).strip()
 
 def main_stylesheet(cfg):
     if resolved_theme(cfg) == "light":
@@ -362,6 +411,9 @@ def main_stylesheet(cfg):
         QLabel { color:#24292f; }
         QLabel#folderPath { color:#0f172a; font-size:13px; font-weight:600; }
         QLabel#fileName { color:#4b5563; font-size:12px; }
+        QFrame#previewPane { background:#ffffff; border:1px solid #c9d1d9; border-radius:8px; }
+        QLabel#previewImage { background:#f1f3f5; border:1px solid #d8dee4; border-radius:6px; }
+        QLabel#previewText { color:#4b5563; font-size:12px; }
         mark { background:#fff3a3; color:#0f172a; }
         #hint { color:#6e7781; font-size:12px; }
         """
@@ -399,6 +451,9 @@ def main_stylesheet(cfg):
         QLabel { color:#dce1e6; }
         QLabel#folderPath { color:#f1f4f7; font-size:13px; font-weight:600; }
         QLabel#fileName { color:#c8d0d8; font-size:12px; }
+        QFrame#previewPane { background:#191a1d; border:1px solid #303238; border-radius:8px; }
+        QLabel#previewImage { background:#101214; border:1px solid #282a2e; border-radius:6px; }
+        QLabel#previewText { color:#c8d0d8; font-size:12px; }
         mark { background:#7c5f16; color:#fff7cc; }
         #hint { color:#858b94; font-size:12px; }
         """
@@ -491,13 +546,15 @@ class HistoryStore:
             current["ip"] = str(entry.get("ip") or "").strip()
             current["lastUsed"] = str(entry.get("lastUsed") or entry.get("last_used") or "")
             current["uses"] = int(entry.get("uses", 1) or 1)
+            current["starred"] = bool(entry.get("starred", False))
             old = merged.get(key)
             if not old or current["lastUsed"] >= old.get("lastUsed", ""):
                 if old:
                     current["uses"] = max(current["uses"], int(old.get("uses", 1) or 1))
+                    current["starred"] = bool(current.get("starred") or old.get("starred"))
                 merged[key] = current
         out = list(merged.values())
-        out.sort(key=lambda x: x.get("lastUsed", ""), reverse=True)
+        out.sort(key=lambda x: (bool(x.get("starred")), x.get("lastUsed", "")), reverse=True)
         return out[:self.max_entries]
 
     def add_results(self, items):
@@ -556,6 +613,7 @@ class HistoryStore:
             if existing_key in incoming:
                 current = incoming.pop(existing_key)
                 current["uses"] = int(entry.get("uses", 0) or 0) + 1
+                current["starred"] = bool(entry.get("starred", False))
                 merged.append(current)
             else:
                 merged.append(entry)
@@ -601,16 +659,61 @@ class HistoryStore:
         except Exception:
             pass
 
-    def clear_current_machine(self):
+    def clear_current_machine(self, clear_starred=False):
         self.load()
         self.entries = [
             x for x in self.entries
-            if x.get("machineId") != self.machine_id and x.get("machine") != self.machine
+            if (
+                x.get("machineId") != self.machine_id and x.get("machine") != self.machine
+            ) or (bool(x.get("starred")) and not clear_starred)
         ]
         try:
             self._write()
         except Exception:
             pass
+
+    def is_starred(self, item):
+        key = result_key(item)
+        self.load()
+        for entry in self.entries:
+            stored = entry.get("item") if isinstance(entry.get("item"), dict) else entry
+            if result_key(stored) == key and (
+                entry.get("machineId") == self.machine_id or entry.get("machine") == self.machine
+            ):
+                return bool(entry.get("starred", False))
+        return False
+
+    def set_starred(self, item, starred):
+        if not self.enabled or not isinstance(item, dict):
+            return
+        self.load()
+        key = result_key(item)
+        now = datetime.now().isoformat(timespec="seconds")
+        found = False
+        for entry in self.entries:
+            stored = entry.get("item") if isinstance(entry.get("item"), dict) else entry
+            if result_key(stored) == key and (
+                entry.get("machineId") == self.machine_id or entry.get("machine") == self.machine
+            ):
+                entry["starred"] = bool(starred)
+                entry["lastUsed"] = now
+                found = True
+        if not found and starred:
+            self.entries.append({
+                "name": str(item.get("name", "") or ""),
+                "extension": str(item.get("extension", "") or ""),
+                "path": QsirchClient.path(item),
+                "size": item.get("size", 0),
+                "lastUsed": now,
+                "machine": self.machine,
+                "machineId": self.machine_id,
+                "ip": self.ip,
+                "uses": 1,
+                "starred": True,
+                "item": item,
+            })
+        self.entries = self._normalise(self.entries)
+        self._write()
 
     def import_machine_to_current(self, source_machine):
         source_machine = str(source_machine or "").strip()
@@ -765,6 +868,8 @@ class Settings(QDialog):
         self.theme_choice.setCurrentIndex(theme_idx if theme_idx >= 0 else 0)
         self.highlight_matches = QCheckBox("Highlight matching text in results")
         self.highlight_matches.setChecked(bcfg["highlight_matches"])
+        self.preview_pane = QCheckBox("Show preview pane")
+        self.preview_pane.setChecked(bcfg["preview_pane"])
         self.hotkey_edit = ShortcutEdit(normalise_hotkey_text(bcfg["global_hotkey"]))
         self.hotkey_edit.setPlaceholderText("Ctrl+Space")
         self.hotkey_warning = QLabel("")
@@ -775,6 +880,7 @@ class Settings(QDialog):
         bf.addRow("", self.show_taskbar)
         bf.addRow("Theme", self.theme_choice)
         bf.addRow("", self.highlight_matches)
+        bf.addRow("", self.preview_pane)
         bf.addRow("Hide / unhide shortcut", self.hotkey_edit)
         bf.addRow("", self.hotkey_warning)
         self.tabs.addTab(behavior, "Appearance / Behavior")
@@ -860,6 +966,8 @@ class Settings(QDialog):
         self.history_max.setRange(1, 5000)
         self.history_max.setValue(hcfg["max_entries"])
         self.clear_history = QCheckBox("Clear this machine's history when saving")
+        self.clear_starred_history = QCheckBox("Also clear starred results")
+        self.clear_starred_history.setToolTip("Normally starred results stay saved when this machine's history is cleared.")
         clear_this_machine = QPushButton("Clear This Machine's History")
         clear_this_machine.clicked.connect(self.clear_current_machine_history)
         import_machine = QPushButton("Import Another Machine's History")
@@ -868,6 +976,7 @@ class Settings(QDialog):
         hf.addRow("History file", self.history_file)
         hf.addRow("Maximum entries", self.history_max)
         hf.addRow("", self.clear_history)
+        hf.addRow("", self.clear_starred_history)
         hf.addRow("", clear_this_machine)
         hf.addRow("", import_machine)
         self.tabs.addTab(hist, "History")
@@ -1003,7 +1112,7 @@ class Settings(QDialog):
     def clear_current_machine_history(self):
         parent = self.parent()
         if parent and hasattr(parent, "history"):
-            parent.history.clear_current_machine()
+            parent.history.clear_current_machine(self.clear_starred_history.isChecked())
             parent.refresh_history_view()
             QMessageBox.information(
                 self,
@@ -1087,12 +1196,14 @@ class Settings(QDialog):
                 "global_hotkey": hotkey_text,
                 "theme": self.theme_choice.currentData() or "system",
                 "highlight_matches": self.highlight_matches.isChecked(),
+                "preview_pane": self.preview_pane.isChecked(),
             },
             "history": {
                 "enabled": self.history_enabled.isChecked(),
                 "file": self.history_file.text().strip() or "history.json",
                 "max_entries": self.history_max.value(),
                 "clear_on_save": self.clear_history.isChecked(),
+                "clear_starred_on_save": self.clear_starred_history.isChecked(),
             },
         }
 
@@ -1107,6 +1218,8 @@ class Main(QWidget):
         self.cfg = self.load()
         self.client = None
         self.worker = None
+        self.preview_worker = None
+        self.preview_request_id = 0
         self.results = []
         self.history = HistoryStore(self.cfg)
         self.exiting = False
@@ -1117,6 +1230,7 @@ class Main(QWidget):
         self.pinned = bool(self.cfg.get("always_on_top", True))
         self.behavior = behavior_defaults(self.cfg)
         self.show_in_taskbar = bool(self.behavior["show_in_taskbar"])
+        self.preview_visible = bool(self.behavior["preview_pane"])
         self.hotkey_manager = HotkeyManager(self)
         self.hotkey_warning = ""
         self.apply_window_flags()
@@ -1172,7 +1286,7 @@ class Main(QWidget):
                     ]
                 },
                 "history": {"enabled": True, "file": "history.json", "max_entries": 200},
-                "behavior": {"show_in_taskbar": True, "global_hotkey": "Ctrl+Space", "theme": "system", "highlight_matches": True},
+                "behavior": {"show_in_taskbar": True, "global_hotkey": "Ctrl+Space", "theme": "system", "highlight_matches": True, "preview_pane": False},
                 "always_on_top": True
             }
 
@@ -1221,6 +1335,16 @@ class Main(QWidget):
         top.addWidget(self.pin_btn)
         self.update_pin_button()
 
+        self.preview_btn=QPushButton("Preview")
+        self.preview_btn.setObjectName("toolButton")
+        self.preview_btn.setToolTip("Show or hide the preview pane")
+        self.preview_btn.setCheckable(True)
+        self.preview_btn.setChecked(self.preview_visible)
+        self.preview_btn.setFixedWidth(74)
+        self.preview_btn.setMinimumHeight(36)
+        self.preview_btn.clicked.connect(self.toggle_preview_pane)
+        top.addWidget(self.preview_btn)
+
         self.gear=QPushButton("Settings")
         self.gear.setObjectName("toolButton")
         self.gear.setToolTip("Qsirch connection settings")
@@ -1266,9 +1390,45 @@ class Main(QWidget):
         self.list=QListWidget()
         self.list.setSelectionMode(QAbstractItemView.SingleSelection)
         self.list.itemDoubleClicked.connect(self.open_item)
+        self.list.itemSelectionChanged.connect(self.selection_changed)
         self.list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self.menu)
-        v.addWidget(self.list,1)
+
+        self.preview_panel = QFrame()
+        self.preview_panel.setObjectName("previewPane")
+        pp = QVBoxLayout(self.preview_panel)
+        pp.setContentsMargins(10, 10, 10, 10)
+        pp.setSpacing(8)
+        ph = QHBoxLayout()
+        self.preview_title = QLabel("Preview")
+        self.preview_title.setObjectName("folderPath")
+        self.preview_title.setWordWrap(True)
+        close_preview = QPushButton("Hide")
+        close_preview.setFixedWidth(56)
+        close_preview.clicked.connect(lambda: self.set_preview_visible(False))
+        ph.addWidget(self.preview_title, 1)
+        ph.addWidget(close_preview)
+        pp.addLayout(ph)
+        self.preview_image = QLabel("")
+        self.preview_image.setObjectName("previewImage")
+        self.preview_image.setAlignment(Qt.AlignCenter)
+        self.preview_image.setMinimumSize(220, 150)
+        self.preview_image.setScaledContents(False)
+        pp.addWidget(self.preview_image)
+        self.preview_text = QLabel("Select a result to preview.")
+        self.preview_text.setObjectName("previewText")
+        self.preview_text.setWordWrap(True)
+        self.preview_text.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.preview_text.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        pp.addWidget(self.preview_text, 1)
+
+        self.content_splitter = QSplitter(Qt.Horizontal)
+        self.content_splitter.addWidget(self.list)
+        self.content_splitter.addWidget(self.preview_panel)
+        self.content_splitter.setStretchFactor(0, 3)
+        self.content_splitter.setStretchFactor(1, 2)
+        self.preview_panel.setVisible(self.preview_visible)
+        v.addWidget(self.content_splitter,1)
 
         bottom=QHBoxLayout()
         bottom.addWidget(self.version_label)
@@ -1303,7 +1463,9 @@ class Main(QWidget):
         taskbar_changed = self.show_in_taskbar != bcfg["show_in_taskbar"]
         self.behavior = bcfg
         self.show_in_taskbar = bool(bcfg["show_in_taskbar"])
+        self.preview_visible = bool(bcfg["preview_pane"])
         self.apply_style()
+        self.set_preview_visible(self.preview_visible, persist=False)
         if taskbar_changed:
             self.apply_window_flags()
             if was_visible:
@@ -1338,6 +1500,119 @@ class Main(QWidget):
             return
         self.pin_btn.setChecked(self.pinned)
         self.pin_btn.setText("Always on top" if self.pinned else "On top")
+
+    def update_preview_button(self):
+        if hasattr(self, "preview_btn"):
+            self.preview_btn.setChecked(self.preview_visible)
+
+    def set_preview_visible(self, visible, persist=True):
+        self.preview_visible = bool(visible)
+        if hasattr(self, "preview_panel"):
+            self.preview_panel.setVisible(self.preview_visible)
+        self.update_preview_button()
+        if persist:
+            self.cfg.setdefault("behavior", {})["preview_pane"] = self.preview_visible
+            self.save()
+        if self.preview_visible:
+            self.load_selected_preview()
+        else:
+            self.clear_preview("Preview hidden")
+
+    def toggle_preview_pane(self):
+        self.set_preview_visible(not self.preview_visible)
+
+    def selected_item_data(self):
+        item = self.selected()
+        if isinstance(item, dict) and item.get("_history"):
+            item = item.get("item", item)
+        return item if isinstance(item, dict) else None
+
+    def selection_changed(self):
+        if self.preview_visible:
+            self.load_selected_preview()
+
+    def clear_preview(self, text="Select a result to preview."):
+        if hasattr(self, "preview_image"):
+            self.preview_image.clear()
+            self.preview_image.setText("")
+        if hasattr(self, "preview_text"):
+            self.preview_text.setText(text)
+        if hasattr(self, "preview_title"):
+            self.preview_title.setText("Preview")
+
+    def load_selected_preview(self):
+        if not self.preview_visible or not hasattr(self, "preview_text"):
+            return
+        item = self.selected_item_data()
+        if not item:
+            self.clear_preview()
+            return
+        folder, file_name = result_display_parts(item, QsirchClient.path(item))
+        self.preview_title.setText(file_name or "Preview")
+        self.preview_image.clear()
+        self.preview_text.setText("Loading preview...")
+        if not all((self.cfg.get("host"), self.cfg.get("user"), self.cfg.get("password"))):
+            self.preview_text.setText("Configure the QNAP connection to load previews.")
+            return
+        self.preview_request_id += 1
+        request_id = self.preview_request_id
+
+        def fn(preview_item, rid):
+            client = self.ensure_client()
+            thumb = client.thumbnail(preview_item)
+            summary = ""
+            try:
+                summary = preview_summary(client.preview(preview_item))
+            except Exception as e:
+                if not thumb:
+                    summary = str(e)
+            return {"request_id": rid, "thumbnail": thumb, "summary": summary}
+
+        self.preview_worker = Worker(fn, item, request_id)
+        self.preview_worker.done.connect(self.preview_loaded)
+        self.preview_worker.fail.connect(self.preview_failed)
+        self.preview_worker.start()
+
+    def preview_loaded(self, data):
+        if not isinstance(data, dict) or data.get("request_id") != self.preview_request_id:
+            return
+        thumb = data.get("thumbnail")
+        if isinstance(thumb, dict) and thumb.get("content"):
+            pix = QPixmap()
+            if pix.loadFromData(thumb["content"]):
+                target = self.preview_image.size()
+                self.preview_image.setPixmap(pix.scaled(target, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            else:
+                self.preview_image.setText("Thumbnail unavailable")
+        else:
+            self.preview_image.setText("No thumbnail")
+        self.preview_text.setText(data.get("summary") or "No preview available.")
+
+    def preview_failed(self, msg):
+        self.preview_image.clear()
+        self.preview_text.setText(msg or "Preview unavailable.")
+
+    def make_star_button(self, item):
+        button = QPushButton()
+        button.setFixedWidth(76)
+        button.setToolTip("Keep this result in saved history")
+        starred = self.history.is_starred(item)
+        button.setText("Starred" if starred else "Star")
+        button.clicked.connect(lambda checked=False, x=item: self.toggle_star(x))
+        return button
+
+    def toggle_star(self, item):
+        if isinstance(item, dict) and item.get("_history"):
+            item = item.get("item", item)
+        if not isinstance(item, dict):
+            return
+        starred = not self.history.is_starred(item)
+        self.history.set_starred(item, starred)
+        self.status.setText("Starred result" if starred else "Removed star")
+        if self.search.text().strip():
+            self.render_results(len(self.results), 0, self.status.text())
+        else:
+            self.refresh_history_view()
 
     def toggle_pin(self):
         self.pinned = bool(self.pin_btn.isChecked())
@@ -1472,7 +1747,9 @@ class Main(QWidget):
                 ip = entry.get("ip", "")
                 used = entry.get("lastUsed", "")
                 meta_parts = [x for x in (machine, ip, used) if x]
-                meta = str(file_name or name or "Saved result") + ("\n" + "  |  ".join(meta_parts) if meta_parts else "")
+                starred = self.history.is_starred(item)
+                star_text = "Starred\n" if starred else ""
+                meta = star_text + str(file_name or name or "Saved result") + ("\n" + "  |  ".join(meta_parts) if meta_parts else "")
                 li = QListWidgetItem()
                 li.setData(Qt.UserRole, {"_history": True, "item": item})
                 row = QWidget()
@@ -1501,7 +1778,9 @@ class Main(QWidget):
                 explorerb.setFixedWidth(70)
                 explorerb.setToolTip("Show this file in Explorer")
                 explorerb.clicked.connect(lambda checked=False, x=item: self.explorer_item(x))
+                starb = self.make_star_button(item)
                 rh.addWidget(info_box, 1)
+                rh.addWidget(starb)
                 rh.addWidget(openb)
                 rh.addWidget(explorerb)
                 self.add_sized_row(li, row, 76)
@@ -1511,11 +1790,18 @@ class Main(QWidget):
             else:
                 self.status.setText("Ready")
                 self.count.clear()
+            if self.preview_visible:
+                if entries:
+                    self.list.setCurrentRow(0)
+                else:
+                    self.clear_preview()
         finally:
             self.refreshing_history = False
         compact = not entries
         self.status_bar_widget.setVisible(not compact)
         self.list.setVisible(not compact)
+        if hasattr(self, "content_splitter"):
+            self.content_splitter.setVisible(not compact)
         self.hint.setVisible(not compact)
         if compact:
             self.setMinimumHeight(COMPACT_HEIGHT)
@@ -1534,6 +1820,8 @@ class Main(QWidget):
             self.status_bar_widget.setVisible(not compact)
         if hasattr(self, "list"):
             self.list.setVisible(not compact)
+        if hasattr(self, "content_splitter"):
+            self.content_splitter.setVisible(not compact)
         if hasattr(self, "hint"):
             self.hint.setVisible(not compact)
 
@@ -1568,14 +1856,16 @@ class Main(QWidget):
             if values is None:
                 self.settings()
                 return
-            clear_history = (values.get("history", {}) or {}).pop("clear_on_save", False)
+            hvalues = values.get("history", {}) or {}
+            clear_history = hvalues.pop("clear_on_save", False)
+            clear_starred = hvalues.pop("clear_starred_on_save", False)
             self.cfg.update(values)
             self.save()
             self.client=None
             self.apply_behavior()
             self.history.configure(self.cfg)
             if clear_history:
-                self.history.clear_current_machine()
+                self.history.clear_current_machine(clear_starred)
             self.history.load()
             self.refresh_history_view()
             if self.hotkey_warning:
@@ -1699,7 +1989,9 @@ class Main(QWidget):
             explorerb.setFixedWidth(70)
             explorerb.setToolTip("Show this file in Explorer")
             explorerb.clicked.connect(lambda checked=False, x=item: self.explorer_item(x))
+            starb=self.make_star_button(item)
             rh.addWidget(info_box,1)
+            rh.addWidget(starb)
             rh.addWidget(openb)
             rh.addWidget(explorerb)
             self.add_sized_row(li, row, 76)
@@ -1710,6 +2002,11 @@ class Main(QWidget):
         self.status.setText(status_text)
         self.has_visible_content = bool(self.results)
         self.update_compact_state()
+        if self.preview_visible:
+            if self.results:
+                self.list.setCurrentRow(0)
+            else:
+                self.clear_preview()
 
     def show_results(self,data):
         if hasattr(self, "busy"):
