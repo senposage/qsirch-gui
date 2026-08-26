@@ -15,15 +15,10 @@ public sealed class ResultRules(AppConfig config)
 
     public bool IsExcluded(SearchResult result)
     {
-        var path = Normalize(result.Path);
         var fileName = result.FileName;
-        var parent = path;
-        if (!string.IsNullOrWhiteSpace(fileName) && parent.EndsWith(fileName, StringComparison.OrdinalIgnoreCase))
-        {
-            parent = parent[..^fileName.Length].TrimEnd('\\');
-        }
+        var parent = ParentPath(result);
         var components = parent.Split('\\', StringSplitOptions.RemoveEmptyEntries);
-        var candidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { parent, parent + "\\" };
+        var candidates = PathCandidates(result);
         for (var i = 0; i < components.Length; i++)
         {
             var tail = string.Join('\\', components.Skip(i));
@@ -39,7 +34,7 @@ public sealed class ResultRules(AppConfig config)
             var normalized = Normalize(rule);
             if (HasWildcard(normalized))
             {
-                if (candidates.Any(candidate => WildcardMatch(candidate, normalized)) ||
+                if (candidates.Any(candidate => RuleMatchesPath(candidate, normalized)) ||
                     components.Any(component => WildcardMatch(component, normalized)))
                 {
                     return true;
@@ -81,7 +76,8 @@ public sealed class ResultRules(AppConfig config)
         var matches = new List<(int specificity, string access)>();
         foreach (var rule in rules)
         {
-            if (!WildcardMatch(Normalize(result.Path), Normalize(rule.Pattern)))
+            var pattern = Normalize(rule.Pattern);
+            if (!PathCandidates(result).Any(candidate => RuleMatchesPath(candidate, pattern)))
             {
                 continue;
             }
@@ -133,7 +129,70 @@ public sealed class ResultRules(AppConfig config)
 
     private static string Normalize(string value) => (value ?? "").Replace('/', '\\').Trim();
 
+    private static string ParentPath(SearchResult result)
+    {
+        var path = Normalize(result.Path);
+        var fileName = result.FileName;
+        if (!string.IsNullOrWhiteSpace(fileName) && path.EndsWith(fileName, StringComparison.OrdinalIgnoreCase))
+        {
+            path = path[..^fileName.Length].TrimEnd('\\');
+        }
+        return path;
+    }
+
+    private static string FullPath(SearchResult result)
+    {
+        var path = Normalize(result.Path).TrimEnd('\\');
+        var fileName = result.FileName;
+        if (string.IsNullOrWhiteSpace(fileName) || path.EndsWith(fileName, StringComparison.OrdinalIgnoreCase))
+        {
+            return path;
+        }
+        return string.IsNullOrWhiteSpace(path) ? fileName : $"{path}\\{fileName}";
+    }
+
+    private static HashSet<string> PathCandidates(SearchResult result)
+    {
+        var candidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        AddPathCandidate(candidates, ParentPath(result));
+        AddPathCandidate(candidates, FullPath(result));
+        return candidates;
+    }
+
+    private static void AddPathCandidate(HashSet<string> candidates, string path)
+    {
+        path = Normalize(path).TrimEnd('\\');
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+        candidates.Add(path);
+        candidates.Add(path + "\\");
+        if (path.StartsWith("Shared\\", StringComparison.OrdinalIgnoreCase))
+        {
+            var withoutShared = path[7..];
+            candidates.Add(withoutShared);
+            candidates.Add(withoutShared + "\\");
+        }
+    }
+
     private static bool HasWildcard(string value) => value.IndexOfAny(['*', '?', '[', ']']) >= 0;
+
+    private static bool RuleMatchesPath(string path, string rule)
+    {
+        path = Normalize(path).TrimEnd('\\');
+        rule = Normalize(rule).TrimEnd('\\');
+        if (string.IsNullOrWhiteSpace(path) || string.IsNullOrWhiteSpace(rule))
+        {
+            return false;
+        }
+        if (HasWildcard(rule))
+        {
+            return WildcardMatch(path, rule) || WildcardMatch(path + "\\", rule);
+        }
+        return path.Equals(rule, StringComparison.OrdinalIgnoreCase) ||
+               path.StartsWith(rule + "\\", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static bool WildcardMatch(string text, string pattern)
     {
