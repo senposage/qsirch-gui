@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "PyQsirchgui"
-APP_VERSION = "v10.20"
+APP_VERSION = "v10.21"
 COMPACT_HEIGHT = 132
 UPSTREAM_REPO = "https://github.com/iios-co/qsirch"
 FORK_REPO = "https://github.com/senposage/qsirch-gui"
@@ -322,7 +322,9 @@ def behavior_defaults(cfg):
     if theme not in ("system", "light", "dark"):
         theme = "system"
     result_view = str(raw.get("result_view", raw.get("resultView", "details")) or "details").lower()
-    if result_view not in ("details", "content", "small_icons", "large_icons"):
+    if result_view == "content":
+        result_view = "details"
+    if result_view not in ("large_icons", "small_icons", "list", "details"):
         result_view = "details"
     return {
         "show_in_taskbar": bool(raw.get("show_in_taskbar", raw.get("showInTaskbar", True))),
@@ -447,6 +449,32 @@ def result_key(item):
     name = str(item.get("name", "") or "").casefold()
     ext = str(item.get("extension", "") or "").casefold()
     return path, name, ext
+
+def is_folder_result(item):
+    values = []
+    for key in ("type", "kind", "file_type", "fileType", "container_type", "containerType"):
+        value = item.get(key)
+        if isinstance(value, list):
+            values.extend(value)
+        elif value:
+            values.append(value)
+    category = item.get("category", [])
+    if isinstance(category, list):
+        values.extend(category)
+    elif category:
+        values.append(category)
+    folded = {str(value).strip().casefold() for value in values if value}
+    if folded & {"folder", "directory", "dir"}:
+        return True
+    if str(item.get("is_dir", item.get("isDir", ""))).casefold() in ("1", "true", "yes"):
+        return True
+    if str(item.get("extension", "") or "").strip():
+        return False
+    path = str(QsirchClient.path(item) or "")
+    if path.endswith(("/", "\\")):
+        return True
+    name = str(item.get("name", "") or "")
+    return bool(name and "." not in name)
 
 def highlight_text(text, query, enabled):
     text = str(text or "")
@@ -574,7 +602,7 @@ def windows_rank(item, query, folders_first=True):
     exact_score = 0 if exact and exact in name.casefold() else 1
     starts_score = 0 if exact and name.casefold().startswith(exact) else 1
     term_hits = sum(1 for term in terms if term in haystack)
-    folder_score = 0 if folders_first and str(item.get("type", "")).lower() == "folder" else 1
+    folder_score = 0 if folders_first and is_folder_result(item) else 1
     return (folder_score, exact_score, starts_score, -term_hits, name.casefold())
 
 def main_stylesheet(cfg):
@@ -1107,10 +1135,10 @@ class Settings(QDialog):
         self.preview_pane.setChecked(bcfg["preview_pane"])
         self.result_view_choice = QComboBox()
         for label, value in (
-            ("Details", "details"),
-            ("Content", "content"),
-            ("Small icons", "small_icons"),
             ("Large icons", "large_icons"),
+            ("Small icons", "small_icons"),
+            ("List", "list"),
+            ("Details", "details"),
         ):
             self.result_view_choice.addItem(label, value)
         view_idx = self.result_view_choice.findData(bcfg["result_view"])
@@ -1703,12 +1731,12 @@ class Main(QWidget):
         self.view_mode=QComboBox()
         self.view_mode.setObjectName("compactCombo")
         self.view_mode.setToolTip("Change result view")
-        for label, value in (("Details", "details"), ("Content", "content"), ("Small icons", "small_icons"), ("Large icons", "large_icons")):
+        for label, value in (("Large icons", "large_icons"), ("Small icons", "small_icons"), ("List", "list"), ("Details", "details")):
             self.view_mode.addItem(label, value)
         view_idx = self.view_mode.findData(behavior_defaults(self.cfg)["result_view"])
         self.view_mode.setCurrentIndex(view_idx if view_idx >= 0 else 0)
         self.view_mode.setMinimumHeight(36)
-        self.view_mode.setFixedWidth(112)
+        self.view_mode.setFixedWidth(116)
         self.view_mode.currentIndexChanged.connect(self.result_view_changed)
         top.addWidget(self.view_mode)
 
@@ -2486,31 +2514,34 @@ class Main(QWidget):
 
     def configure_result_list_for_view(self):
         mode = self.current_result_view()
-        icon_mode = mode in ("small_icons", "large_icons")
+        icon_mode = mode in ("large_icons", "small_icons", "list")
         self.list.setViewMode(QListWidget.IconMode if icon_mode else QListWidget.ListMode)
         self.list.setMovement(QListWidget.Static)
         self.list.setResizeMode(QListWidget.Adjust)
         self.list.setWrapping(icon_mode)
         self.list.setWordWrap(True)
         self.list.setUniformItemSizes(icon_mode)
-        self.list.setSpacing(8 if icon_mode else 0)
+        self.list.setSpacing(6 if icon_mode else 0)
         if mode == "large_icons":
             self.list.setIconSize(QSize(72, 72))
             self.list.setGridSize(QSize(172, 142))
         elif mode == "small_icons":
             self.list.setIconSize(QSize(28, 28))
             self.list.setGridSize(QSize(208, 58))
+        elif mode == "list":
+            self.list.setIconSize(QSize(18, 18))
+            self.list.setGridSize(QSize(260, 32))
         else:
             self.list.setIconSize(QSize(22, 22))
             self.list.setGridSize(QSize())
 
     def result_icon(self, item):
+        if is_folder_result(item):
+            return self.style().standardIcon(QStyle.SP_DirIcon)
         path = QsirchClient.path(item)
         ext = str(item.get("extension", "") or "").lower()
         if not ext and "." in str(path or ""):
             ext = str(path).rsplit(".", 1)[-1].lower()
-        if not ext:
-            return self.style().standardIcon(QStyle.SP_DirIcon)
         return self.style().standardIcon(QStyle.SP_FileIcon)
 
     def result_title_text(self, item):
@@ -2524,9 +2555,12 @@ class Main(QWidget):
         li = QListWidgetItem(self.result_icon(item), title)
         li.setData(Qt.UserRole, {"_history": True, "item": item} if history_entry is not None else item)
         li.setToolTip(display_path(path) if path else title)
-        li.setTextAlignment(Qt.AlignHCenter | Qt.AlignTop)
-        if self.current_result_view() == "large_icons":
+        mode = self.current_result_view()
+        li.setTextAlignment((Qt.AlignLeft | Qt.AlignVCenter) if mode == "list" else (Qt.AlignHCenter | Qt.AlignTop))
+        if mode == "large_icons":
             li.setSizeHint(QSize(172, 142))
+        elif mode == "list":
+            li.setSizeHint(QSize(260, 32))
         else:
             li.setSizeHint(QSize(208, 58))
         self.list.addItem(li)
@@ -2561,13 +2595,20 @@ class Main(QWidget):
                 item = entry.get("item") if isinstance(entry.get("item"), dict) else entry
                 if not self.is_visibility_hidden(item):
                     entries.append(entry)
+            if behavior_defaults(self.cfg)["folders_first"]:
+                entries = [
+                    entry for _, entry in sorted(
+                        enumerate(entries),
+                        key=lambda pair: (0 if is_folder_result(pair[1].get("item") if isinstance(pair[1].get("item"), dict) else pair[1]) else 1, pair[0])
+                    )
+                ]
             starred_keys = self.history.starred_keys()
             self.list.clear()
             self.configure_result_list_for_view()
             view = self.current_result_view()
             for entry in entries:
                 item = entry.get("item") if isinstance(entry.get("item"), dict) else entry
-                if view in ("small_icons", "large_icons"):
+                if view in ("large_icons", "small_icons", "list"):
                     self.add_icon_result_item(item, entry)
                     continue
                 name = entry.get("name") or item.get("name", "")
@@ -2582,9 +2623,9 @@ class Main(QWidget):
                 meta_parts = [x for x in (machine, ip, used) if x]
                 starred = result_key(item) in starred_keys
                 meta = str(file_name or name or "Saved result")
-                if view == "content" and meta_parts:
+                if meta_parts:
                     meta += "\n" + "  |  ".join(meta_parts)
-                if path and view == "content":
+                if path:
                     meta += "\n" + display_path(path)
                 li = QListWidgetItem()
                 li.setData(Qt.UserRole, {"_history": True, "item": item})
@@ -2622,7 +2663,7 @@ class Main(QWidget):
                     rh.addWidget(downb)
                 rh.addWidget(openb)
                 rh.addWidget(explorerb)
-                self.add_sized_row(li, row, 82 if view == "content" else 58)
+                self.add_sized_row(li, row, 76)
             if entries:
                 self.status.setText("Saved results")
                 self.count.setText(f"{len(entries):,} saved")
@@ -2844,6 +2885,13 @@ class Main(QWidget):
         folders_first = behavior_defaults(self.cfg)["folders_first"]
         if opts.get("sort_by") == "relevance":
             return sorted(items, key=lambda item: windows_rank(item, opts.get("query", ""), folders_first))
+        if folders_first:
+            return [
+                item for _, item in sorted(
+                    enumerate(items),
+                    key=lambda pair: (0 if is_folder_result(pair[1]) else 1, pair[0])
+                )
+            ]
         return list(items)
 
     def render_results(self, server_total, hidden=0, status_text="Ready"):
@@ -2857,7 +2905,7 @@ class Main(QWidget):
         starred_keys = self.history.starred_keys()
         view = self.current_result_view()
         for item in self.results:
-            if view in ("small_icons", "large_icons"):
+            if view in ("large_icons", "small_icons", "list"):
                 self.add_icon_result_item(item)
                 continue
             path=QsirchClient.path(item)
@@ -2884,7 +2932,7 @@ class Main(QWidget):
             detail_text = str(file_name)
             if size:
                 detail_text += f"\n{size}"
-            if path and view == "content":
+            if path:
                 detail_text += f"\n{display_path(path)}"
             detail=QLabel()
             detail.setObjectName("fileName")
@@ -2910,7 +2958,7 @@ class Main(QWidget):
                 rh.addWidget(downb)
             rh.addWidget(openb)
             rh.addWidget(explorerb)
-            self.add_sized_row(li, row, 82 if view == "content" else 58)
+            self.add_sized_row(li, row, 76)
         if hidden:
             self.count.setText(f"{len(self.results):,} shown  •  {hidden:,} excluded  •  {server_total:,} total")
         else:
