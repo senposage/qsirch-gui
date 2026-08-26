@@ -16,6 +16,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly ObservableCollection<SearchResult> _allResults = [];
     private readonly HistoryStore _history;
     private readonly ShellActions _shell;
+    private ResultRules _rules;
     private string _query = "";
     private string _statusText = "Ready";
     private string _countText = "";
@@ -24,6 +25,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private double _iconGlyphSize = 54;
     private double _iconTileWidth = 150;
     private double _iconTileHeight = 118;
+    private string _sortColumn = "name";
+    private bool _sortDescending;
     private CancellationTokenSource? _searchCts;
 
     public MainWindow()
@@ -31,12 +34,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         InitializeComponent();
         _history = new HistoryStore(_config);
         _shell = new ShellActions(new PathMapper(_config));
+        _rules = new ResultRules(_config);
         DataContext = this;
         LoadFavorites();
         TypeBox.SelectedIndex = 0;
         var configuredView = string.IsNullOrWhiteSpace(_config.Behavior.ResultView) ? "details" : _config.Behavior.ResultView;
         ViewBox.SelectedItem = ViewModes.FirstOrDefault(x => x.Key.Equals(configuredView, StringComparison.OrdinalIgnoreCase)) ?? ViewModes[^1];
         ApplyViewMode();
+        ApplyBehavior();
     }
 
     public ObservableCollection<SearchResult> VisibleResults { get; } = [];
@@ -152,15 +157,23 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         try
         {
+            var cached = _history.SearchResults(query, _config.History.SourceFilter)
+                .Where(result => !_rules.IsHidden(result))
+                .ToList();
+            if (cached.Count > 0)
+            {
+                ReplaceResults(cached);
+                StatusText = "Saved results";
+                return;
+            }
+
             using var client = new QsirchClient(_config);
             var typeFilter = SelectedTypeFilter();
             var results = await client.SearchAsync(query, typeFilter, _searchCts.Token);
-            _allResults.Clear();
-            foreach (var result in SortResults(results))
-            {
-                _allResults.Add(result);
-            }
-            ApplyLocalFilters();
+            var visible = results.Where(result => !_rules.IsHidden(result)).ToList();
+            _history.AddResults(results);
+            ReplaceResults(visible);
+            LoadFavorites();
             StatusText = "Ready";
         }
         catch (OperationCanceledException)
@@ -185,6 +198,25 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void ViewChanged(object sender, SelectionChangedEventArgs e)
     {
         ApplyViewMode();
+    }
+
+    private void DetailsHeaderClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is not GridViewColumnHeader header || header.Tag is not string column)
+        {
+            return;
+        }
+        if (_sortColumn.Equals(column, StringComparison.OrdinalIgnoreCase))
+        {
+            _sortDescending = !_sortDescending;
+        }
+        else
+        {
+            _sortColumn = column;
+            _sortDescending = false;
+        }
+        ApplyLocalFilters();
+        StatusText = $"Sorted by {header.Content}{(_sortDescending ? " descending" : "")}";
     }
 
     private void ResultSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -213,6 +245,57 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
 
     private void FavoriteSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (FavoritesList.SelectedItem is SearchResult result)
+        {
+            PreviewText = $"{result.FileName}\r\n{result.DisplayPath}\r\n{result.Kind} {result.SizeText}".Trim();
+        }
+    }
+
+    private void FavoriteDoubleClicked(object sender, MouseButtonEventArgs e)
+    {
+        OpenFavorite();
+    }
+
+    private void OpenFavoriteClicked(object sender, RoutedEventArgs e)
+    {
+        OpenFavorite();
+    }
+
+    private void ShowFavoriteClicked(object sender, RoutedEventArgs e)
+    {
+        var result = FavoritesList.SelectedItem as SearchResult;
+        if (result == null)
+        {
+            return;
+        }
+        try
+        {
+            _shell.Show(result);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Show favorite", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void UnfavoriteClicked(object sender, RoutedEventArgs e)
+    {
+        if (FavoritesList.SelectedItem is not SearchResult result)
+        {
+            return;
+        }
+        _history.SetStarred(result, false);
+        FavoriteResults.Remove(result);
+        var visible = VisibleResults.FirstOrDefault(x => x.Path.Equals(result.Path, StringComparison.OrdinalIgnoreCase) && x.FileName.Equals(result.FileName, StringComparison.OrdinalIgnoreCase));
+        if (visible != null)
+        {
+            visible.IsFavorite = false;
+        }
+        StatusText = "Removed from Favorites";
+    }
+
+    private void OpenFavorite()
     {
         if (FavoritesList.SelectedItem is not SearchResult result)
         {
@@ -259,15 +342,32 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
         result.IsFavorite = true;
+        _history.SetStarred(result, true);
         if (!FavoriteResults.Any(x => x.Path.Equals(result.Path, StringComparison.OrdinalIgnoreCase) && x.FileName.Equals(result.FileName, StringComparison.OrdinalIgnoreCase)))
         {
             FavoriteResults.Insert(0, result);
         }
+        StatusText = "Added to Favorites";
     }
 
     private void SettingsClicked(object sender, RoutedEventArgs e)
     {
-        MessageBox.Show(this, "Settings will move into the native UI after the Explorer view is stable. For now, edit config.json or use the Python settings window.", "Settings");
+        var dialog = new SettingsWindow(_config) { Owner = this };
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+        ConfigStore.Save(_config);
+        _rules = new ResultRules(_config);
+        if (dialog.ClearHistoryRequested)
+        {
+            _history.ClearCurrentMachine(dialog.ClearStarredRequested);
+        }
+        LoadFavorites();
+        ApplyLocalFilters();
+        Topmost = _config.AlwaysOnTop;
+        ApplyBehavior();
+        StatusText = "Settings saved";
     }
 
     private void OpenSelected()
@@ -308,17 +408,39 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         CountText = VisibleResults.Count == 0 ? "" : $"{VisibleResults.Count:n0} result{(VisibleResults.Count == 1 ? "" : "s")}";
     }
 
+    private void ReplaceResults(IEnumerable<SearchResult> results)
+    {
+        _allResults.Clear();
+        foreach (var result in SortResults(results))
+        {
+            result.IsFavorite = _history.IsStarred(result);
+            _allResults.Add(result);
+        }
+        ApplyLocalFilters();
+    }
+
     private IEnumerable<SearchResult> SortResults(IEnumerable<SearchResult> results)
     {
-        if (!_config.Behavior.FoldersFirst)
+        var indexed = results.Select((item, index) => (item, index));
+        IOrderedEnumerable<(SearchResult item, int index)> ordered = _config.Behavior.FoldersFirst
+            ? indexed.OrderBy(x => x.item.IsFolder ? 0 : 1)
+            : indexed.OrderBy(x => 0);
+        ordered = _sortDescending
+            ? ordered.ThenByDescending(x => SortValue(x.item, _sortColumn)).ThenBy(x => x.index)
+            : ordered.ThenBy(x => SortValue(x.item, _sortColumn)).ThenBy(x => x.index);
+        return ordered.Select(x => x.item).ToList();
+    }
+
+    private static object SortValue(SearchResult result, string column)
+    {
+        return column switch
         {
-            return results;
-        }
-        return results.Select((item, index) => new { item, index })
-            .OrderBy(x => x.item.IsFolder ? 0 : 1)
-            .ThenBy(x => x.index)
-            .Select(x => x.item)
-            .ToList();
+            "location" => result.DisplayPath,
+            "type" => result.Kind,
+            "size" => result.Size,
+            "modified" => result.Modified,
+            _ => result.FileName,
+        };
     }
 
     private FileTypeFilter SelectedTypeFilter()
@@ -353,6 +475,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 IconTileHeight = 28;
                 break;
         }
+    }
+
+    private void ApplyBehavior()
+    {
+        Topmost = _config.AlwaysOnTop;
+        ShowInTaskbar = _config.Behavior.ShowInTaskbar;
+        PreviewPane.Visibility = _config.Behavior.PreviewPane ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void LoadFavorites()

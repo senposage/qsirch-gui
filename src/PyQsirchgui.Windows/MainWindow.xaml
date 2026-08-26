@@ -89,7 +89,7 @@
     <DockPanel Grid.Row="1" Margin="8,0,8,4">
       <Button Content="Open" Click="OpenClicked" />
       <Button Content="Show" Click="ShowClicked" />
-      <Button Content="Favorite" Click="FavoriteClicked" />
+      <Button Content="☆" ToolTip="Add to Favorites" Click="FavoriteClicked" />
       <Button Content="Settings" Click="SettingsClicked" />
       <TextBlock Text="Explorer-style NAS search" VerticalAlignment="Center" Margin="10,0,0,0" Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}" />
     </DockPanel>
@@ -117,7 +117,17 @@
                    ItemsSource="{Binding FavoriteResults}"
                    ItemTemplate="{StaticResource FavoriteTemplate}"
                    SelectionChanged="FavoriteSelectionChanged"
-                   BorderThickness="0" />
+                   MouseDoubleClick="FavoriteDoubleClicked"
+                   PreviewMouseRightButtonDown="ResultRightButtonDown"
+                   BorderThickness="0">
+            <ListBox.ContextMenu>
+              <ContextMenu>
+                <MenuItem Header="Open" Click="OpenFavoriteClicked" />
+                <MenuItem Header="Show" Click="ShowFavoriteClicked" />
+                <MenuItem Header="Unfavorite" Click="UnfavoriteClicked" />
+              </ContextMenu>
+            </ListBox.ContextMenu>
+          </ListBox>
         </DockPanel>
       </Border>
 
@@ -131,16 +141,36 @@
             <ContextMenu>
               <MenuItem Header="Open" Click="OpenClicked" />
               <MenuItem Header="Show" Click="ShowClicked" />
-              <MenuItem Header="Favorite" Click="FavoriteClicked" />
+              <MenuItem Header="Add to Favorites" Click="FavoriteClicked" />
             </ContextMenu>
           </ListView.ContextMenu>
           <ListView.View>
             <GridView>
-              <GridViewColumn Header="Name" DisplayMemberBinding="{Binding FileName}" Width="240" />
-              <GridViewColumn Header="Location" DisplayMemberBinding="{Binding DisplayPath}" Width="360" />
-              <GridViewColumn Header="Type" DisplayMemberBinding="{Binding Kind}" Width="90" />
-              <GridViewColumn Header="Size" DisplayMemberBinding="{Binding SizeText}" Width="80" />
-              <GridViewColumn Header="Modified" DisplayMemberBinding="{Binding Modified}" Width="130" />
+              <GridViewColumn DisplayMemberBinding="{Binding FileName}" Width="240">
+                <GridViewColumn.Header>
+                  <GridViewColumnHeader Content="Name" Tag="name" Click="DetailsHeaderClicked" />
+                </GridViewColumn.Header>
+              </GridViewColumn>
+              <GridViewColumn DisplayMemberBinding="{Binding DisplayPath}" Width="360">
+                <GridViewColumn.Header>
+                  <GridViewColumnHeader Content="Location" Tag="location" Click="DetailsHeaderClicked" />
+                </GridViewColumn.Header>
+              </GridViewColumn>
+              <GridViewColumn DisplayMemberBinding="{Binding Kind}" Width="90">
+                <GridViewColumn.Header>
+                  <GridViewColumnHeader Content="Type" Tag="type" Click="DetailsHeaderClicked" />
+                </GridViewColumn.Header>
+              </GridViewColumn>
+              <GridViewColumn DisplayMemberBinding="{Binding SizeText}" Width="80">
+                <GridViewColumn.Header>
+                  <GridViewColumnHeader Content="Size" Tag="size" Click="DetailsHeaderClicked" />
+                </GridViewColumn.Header>
+              </GridViewColumn>
+              <GridViewColumn DisplayMemberBinding="{Binding Modified}" Width="130">
+                <GridViewColumn.Header>
+                  <GridViewColumnHeader Content="Modified" Tag="modified" Click="DetailsHeaderClicked" />
+                </GridViewColumn.Header>
+              </GridViewColumn>
             </GridView>
           </ListView.View>
         </ListView>
@@ -157,7 +187,7 @@
             <ContextMenu>
               <MenuItem Header="Open" Click="OpenClicked" />
               <MenuItem Header="Show" Click="ShowClicked" />
-              <MenuItem Header="Favorite" Click="FavoriteClicked" />
+              <MenuItem Header="Add to Favorites" Click="FavoriteClicked" />
             </ContextMenu>
           </ListBox.ContextMenu>
           <ListBox.ItemsPanel>
@@ -168,7 +198,7 @@
         </ListBox>
       </Grid>
 
-      <Border Grid.Column="2" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}" BorderThickness="1" Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}">
+      <Border x:Name="PreviewPane" Grid.Column="2" BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}" BorderThickness="1" Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}">
         <DockPanel>
           <TextBlock Text="Preview" FontWeight="SemiBold" DockPanel.Dock="Top" Margin="8,7,8,3" />
           <TextBox Text="{Binding PreviewText}"

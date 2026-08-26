@@ -6,6 +6,12 @@ namespace PyQsirchgui.Windows.Services;
 
 public static class ConfigStore
 {
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        WriteIndented = true,
+    };
+
     public static string ConfigPath
     {
         get
@@ -25,11 +31,18 @@ public static class ConfigStore
         try
         {
             var text = File.ReadAllText(ConfigPath);
-            return JsonSerializer.Deserialize<AppConfig>(text, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new AppConfig();
+            return JsonSerializer.Deserialize<AppConfig>(text, JsonOptions) ?? new AppConfig();
         }
         catch
         {
             return new AppConfig();
         }
+    }
+
+    public static void Save(AppConfig config)
+    {
+        var path = ConfigPath;
+        Directory.CreateDirectory(Path.GetDirectoryName(path) ?? AppContext.BaseDirectory);
+        File.WriteAllText(path, JsonSerializer.Serialize(config, JsonOptions));
     }
 }
