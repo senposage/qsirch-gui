@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "Qsirch Floating Search"
-APP_VERSION = "v10.8"
+APP_VERSION = "v10.9"
 COMPACT_HEIGHT = 132
 UPSTREAM_REPO = "https://github.com/iios-co/qsirch"
 FORK_REPO = "https://github.com/senposage/qsirch-gui"
@@ -1476,9 +1476,13 @@ class Main(QWidget):
                 li = QListWidgetItem()
                 li.setData(Qt.UserRole, {"_history": True, "item": item})
                 row = QWidget()
-                rh = QVBoxLayout(row)
+                rh = QHBoxLayout(row)
                 rh.setContentsMargins(10, 7, 10, 7)
-                rh.setSpacing(3)
+                rh.setSpacing(10)
+                info_box = QWidget()
+                iv = QVBoxLayout(info_box)
+                iv.setContentsMargins(0, 0, 0, 0)
+                iv.setSpacing(3)
                 title = QLabel(display_path(folder))
                 title.setObjectName("folderPath")
                 title.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -1487,9 +1491,20 @@ class Main(QWidget):
                 detail.setObjectName("fileName")
                 detail.setTextInteractionFlags(Qt.TextSelectableByMouse)
                 detail.setWordWrap(True)
-                rh.addWidget(title)
-                rh.addWidget(detail)
-                self.add_sized_row(li, row, 54)
+                iv.addWidget(title)
+                iv.addWidget(detail)
+                openb = QPushButton("Open")
+                openb.setFixedWidth(70)
+                openb.setToolTip("Open with the Windows default app")
+                openb.clicked.connect(lambda checked=False, x=item: self.open_item(x))
+                explorerb = QPushButton("Show")
+                explorerb.setFixedWidth(70)
+                explorerb.setToolTip("Show this file in Explorer")
+                explorerb.clicked.connect(lambda checked=False, x=item: self.explorer_item(x))
+                rh.addWidget(info_box, 1)
+                rh.addWidget(openb)
+                rh.addWidget(explorerb)
+                self.add_sized_row(li, row, 76)
             if entries:
                 self.status.setText("Saved results")
                 self.count.setText(f"{len(entries):,} saved")
