@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "Qsirch Floating Search"
-APP_VERSION = "v10.2"
+APP_VERSION = "v10.3"
 COMPACT_HEIGHT = 132
 BASE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 CONFIG = BASE_DIR / "config.json"
@@ -102,8 +102,8 @@ class QsirchClient:
             "the HTTP port, or keep HTTPS enabled and use the NAS HTTPS port."
         )
         if "WRONG_VERSION_NUMBER" in msg.upper() or "wrong version number" in msg.lower():
-            return hint
-        return f"{hint}\n\nDetails: {msg}"
+            return f"{hint}\n\nTechnical details: {msg}"
+        return f"{hint}\n\nTechnical details: {msg}"
 
     @staticmethod
     def path(item):
@@ -430,6 +430,28 @@ class HistoryStore:
         except Exception:
             pass
 
+    def import_machine_to_current(self, source_machine):
+        source_machine = str(source_machine or "").strip()
+        if not source_machine or source_machine == self.machine:
+            return 0
+        self.load()
+        now = datetime.now().isoformat(timespec="seconds")
+        imported = []
+        for entry in self.entries:
+            if entry.get("machine") != source_machine:
+                continue
+            clone = dict(entry)
+            clone["machine"] = self.machine
+            clone["machineId"] = self.machine_id
+            clone["ip"] = self.ip
+            clone["lastImported"] = now
+            imported.append(clone)
+        if not imported:
+            return 0
+        self.entries = self._normalise(self.entries + imported)
+        self._write()
+        return len(imported)
+
     def search_results(self, text, mode="__this__"):
         needle = str(text or "").strip().casefold()
         if not needle or not self.enabled:
@@ -702,11 +724,14 @@ class Settings(QDialog):
         self.clear_history = QCheckBox("Clear this machine's history when saving")
         clear_this_machine = QPushButton("Clear This Machine's History")
         clear_this_machine.clicked.connect(self.clear_current_machine_history)
+        import_machine = QPushButton("Import Another Machine's History")
+        import_machine.clicked.connect(self.import_machine_history)
         hf.addRow("", self.history_enabled)
         hf.addRow("History file", self.history_file)
         hf.addRow("Maximum entries", self.history_max)
         hf.addRow("", self.clear_history)
         hf.addRow("", clear_this_machine)
+        hf.addRow("", import_machine)
         self.tabs.addTab(hist, "History")
 
         buttons = QHBoxLayout()
@@ -803,6 +828,39 @@ class Settings(QDialog):
                 "History cleared",
                 "Saved result history for this workstation was cleared."
             )
+
+    def import_machine_history(self):
+        parent = self.parent()
+        if not parent or not hasattr(parent, "history"):
+            return
+        machines = [m for m in parent.history.machines() if m != parent.history.machine]
+        if not machines:
+            QMessageBox.information(self, "No other history", "No saved result history from another workstation was found.")
+            return
+        d = QDialog(self)
+        d.setStyleSheet(self.styleSheet())
+        d.setWindowTitle("Import Machine History")
+        f = QFormLayout(d)
+        picker = QComboBox()
+        picker.addItems(machines)
+        note = QLabel("Copies the selected workstation's saved results into this workstation's history. The original entries are kept.")
+        note.setWordWrap(True)
+        f.addRow("Import from", picker)
+        f.addRow("", note)
+        b = QHBoxLayout()
+        b.addStretch()
+        cancel = QPushButton("Cancel")
+        import_btn = QPushButton("Import")
+        cancel.clicked.connect(d.reject)
+        import_btn.clicked.connect(d.accept)
+        b.addWidget(cancel)
+        b.addWidget(import_btn)
+        f.addRow("", b)
+        if d.exec():
+            source = picker.currentText()
+            count = parent.history.import_machine_to_current(source)
+            parent.refresh_history_view()
+            QMessageBox.information(self, "History imported", f"Imported {count:,} saved result entries from {source}.")
 
     @staticmethod
     def remove_selected(widget):
