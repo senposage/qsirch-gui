@@ -33,6 +33,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private bool _sortDescending;
     private CancellationTokenSource? _searchCts;
     private CancellationTokenSource? _paintCts;
+    private int _searchVersion;
 
     public MainWindow()
     {
@@ -161,6 +162,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         _searchCts?.Cancel();
         _searchCts = new CancellationTokenSource();
+        var searchVersion = ++_searchVersion;
+        var searchToken = _searchCts.Token;
         SetBusy(true);
         StatusText = "Searching...";
         CountText = "";
@@ -173,14 +176,22 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             var showedCached = false;
             if (cached.Count > 0)
             {
-                await ReplaceResultsAsync(cached, _searchCts.Token, "Saved results");
+                await ReplaceResultsAsync(cached, searchToken, "Saved results");
+                if (!IsCurrentSearch(searchVersion))
+                {
+                    return;
+                }
                 StatusText = "Saved results; checking NAS...";
                 showedCached = true;
             }
 
             using var client = new QsirchClient(_config);
             var typeFilter = SelectedTypeFilter();
-            var results = await client.SearchAsync(serverQuery, typeFilter, _searchCts.Token);
+            var results = await client.SearchAsync(serverQuery, typeFilter, searchToken);
+            if (!IsCurrentSearch(searchVersion))
+            {
+                return;
+            }
             if (showedCached && results.Count == 0)
             {
                 StatusText = "Saved results; NAS returned none";
@@ -188,7 +199,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
             var visible = await Task.Run(() => results.Where(result => !_rules.IsHidden(result)).ToList());
             await Task.Run(() => _history.AddResults(results));
-            await ReplaceResultsAsync(visible, _searchCts.Token, "Painting results");
+            if (!IsCurrentSearch(searchVersion))
+            {
+                return;
+            }
+            await ReplaceResultsAsync(visible, searchToken, "Painting results");
+            if (!IsCurrentSearch(searchVersion))
+            {
+                return;
+            }
             LoadFavorites();
             StatusText = visible.Count == 0 && results.Count > 0 ? "No visible results" : "Ready";
         }
@@ -202,13 +221,22 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         finally
         {
-            SetBusy(false);
+            if (IsCurrentSearch(searchVersion))
+            {
+                SetBusy(false);
+            }
         }
     }
 
     private async void TypeChanged(object sender, SelectionChangedEventArgs e)
     {
-        await ApplyLocalFiltersAsync("Filtering results");
+        try
+        {
+            await ApplyLocalFiltersAsync("Filtering results");
+        }
+        catch (OperationCanceledException)
+        {
+        }
     }
 
     private void ViewChanged(object sender, SelectionChangedEventArgs e)
@@ -236,7 +264,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _sortColumn = column;
             _sortDescending = false;
         }
-        await ApplyLocalFiltersAsync("Sorting results");
+        try
+        {
+            await ApplyLocalFiltersAsync("Sorting results");
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
         StatusText = $"Sorted by {header.Content}{(_sortDescending ? " descending" : "")}";
     }
 
@@ -477,6 +512,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         CountText = VisibleResults.Count == 0 ? "" : $"{VisibleResults.Count:n0} result{(VisibleResults.Count == 1 ? "" : "s")}";
     }
+
+    private bool IsCurrentSearch(int version) => version == _searchVersion;
 
     private async Task ReplaceResultsAsync(IEnumerable<SearchResult> results, CancellationToken token, string statusText)
     {

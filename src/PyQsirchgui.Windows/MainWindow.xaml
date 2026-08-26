@@ -69,7 +69,7 @@
     </Grid.RowDefinitions>
 
     <DockPanel Grid.Row="0" Margin="8,8,8,4" LastChildFill="True">
-      <Button Content="Search" DockPanel.Dock="Right" Click="SearchClicked" IsDefault="True" />
+      <Button Content="Search" DockPanel.Dock="Right" Click="SearchClicked" />
       <Button Content="Clear" DockPanel.Dock="Right" Click="ClearClicked" />
       <ComboBox x:Name="ViewBox"
                 DockPanel.Dock="Right"
