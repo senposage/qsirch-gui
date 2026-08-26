@@ -559,10 +559,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         if (result == null)
         {
-        PreviewTitle.Text = "Preview";
-        PreviewText = "Select a result to preview.";
-        ShowPreviewText();
-        return;
+            PreviewTitle.Text = "Preview";
+            PreviewText = "Select a result to preview.";
+            ShowPreviewText();
+            return;
         }
         PreviewTitle.Text = result.FileName;
         PreviewText = $"{result.FileName}\r\n{result.DisplayPath}\r\n{result.Kind} {result.SizeText}".Trim();
@@ -598,7 +598,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var localImage = await Task.Run(() => BuildLocalImagePreview(result));
         if (localImage != null)
         {
-            return PreviewContent.ForImage(localImage, "Preview");
+            return PreviewContent.ForImage(localImage, result.FileName, true);
         }
 
         var localText = await Task.Run(() => BuildLocalTextPreview(result, header));
@@ -607,13 +607,19 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return PreviewContent.ForText(localText);
         }
 
+        var shellPreview = await Task.Run(() => BuildShellPreview(result));
+        if (shellPreview != null)
+        {
+            return PreviewContent.ForImage(shellPreview, result.FileName, true);
+        }
+
         try
         {
             using var client = new QsirchClient(_config);
             var thumbnail = await client.ThumbnailAsync(result, _searchCts?.Token ?? CancellationToken.None);
             if (thumbnail is { Length: > 0 })
             {
-                return PreviewContent.ForImage(thumbnail, "Thumbnail");
+                return PreviewContent.ForImage(thumbnail, $"Thumbnail: {result.FileName}", false);
             }
 
             var preview = await client.PreviewAsync(result, _searchCts?.Token ?? CancellationToken.None);
@@ -645,6 +651,24 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             var path = _mapper.Resolve(result);
             return File.Exists(path) ? File.ReadAllBytes(path) : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private byte[]? BuildShellPreview(SearchResult result)
+    {
+        if (!IsShellPreviewType(result.Extension))
+        {
+            return null;
+        }
+
+        try
+        {
+            var path = _mapper.Resolve(result);
+            return ShellPreviewService.RenderPreview(path);
         }
         catch
         {
@@ -711,11 +735,20 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }.Contains(extension.TrimStart('.'));
     }
 
+    private static bool IsShellPreviewType(string extension)
+    {
+        return new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "pdf", "doc", "docx", "docm", "rtf", "xls", "xlsx", "xlsm", "xlsb", "csv", "ppt", "pptx", "pptm", "pps", "ppsx", "one"
+        }.Contains(extension.TrimStart('.'));
+    }
+
     private void RenderPreview(PreviewContent preview)
     {
         if (preview.ImageBytes != null)
         {
             PreviewImage.Source = BitmapFromBytes(preview.ImageBytes);
+            PreviewImage.Stretch = preview.FitToPane ? Stretch.Uniform : Stretch.None;
             PreviewTitle.Text = preview.Title;
             PreviewText = "";
             PreviewTextBox.Visibility = Visibility.Collapsed;
@@ -782,9 +815,10 @@ internal sealed class PreviewContent
 {
     public string Text { get; private init; } = "";
     public string Title { get; private init; } = "Preview";
+    public bool FitToPane { get; private init; }
     public byte[]? ImageBytes { get; private init; }
 
     public static PreviewContent ForText(string text) => new() { Text = text };
 
-    public static PreviewContent ForImage(byte[] bytes, string title) => new() { ImageBytes = bytes, Title = title };
+    public static PreviewContent ForImage(byte[] bytes, string title, bool fitToPane) => new() { ImageBytes = bytes, Title = title, FitToPane = fitToPane };
 }
