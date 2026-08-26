@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QDateEdit
 )
 
-APP_NAME = "Qsirch Floating Search"
+APP_NAME = "PyQsirchgui"
 APP_VERSION = "v10.19"
 COMPACT_HEIGHT = 132
 UPSTREAM_REPO = "https://github.com/iios-co/qsirch"
@@ -1055,7 +1055,7 @@ class Settings(QDialog):
     def __init__(self, parent, cfg):
         super().__init__(parent)
         self.cfg = json.loads(json.dumps(cfg))
-        self.setWindowTitle(f"Qsirch Floating Search Settings {APP_VERSION}")
+        self.setWindowTitle(f"{APP_NAME} Settings {APP_VERSION}")
         self.resize(720, 560)
         self.setStyleSheet(settings_stylesheet(self.cfg))
 
@@ -1789,7 +1789,7 @@ class Main(QWidget):
 
         self.exit_btn=QPushButton("Exit")
         self.exit_btn.setObjectName("exitButton")
-        self.exit_btn.setToolTip("Exit Qsirch Floating Search")
+        self.exit_btn.setToolTip(f"Exit {APP_NAME}")
         self.exit_btn.setFixedWidth(52)
         self.exit_btn.setMinimumHeight(36)
         self.exit_btn.clicked.connect(self.quit_app)

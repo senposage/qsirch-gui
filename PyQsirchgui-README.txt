@@ -1,4 +1,4 @@
-Qsirch Floating Search v10
+PyQsirchgui v10
 
 License and attribution:
 - This GUI is part of a fork of the upstream Qsirch CLI/API project:
@@ -11,11 +11,11 @@ Build:
 Run build.bat.
 
 Expected output:
-  dist\QsirchFloating\QsirchFloating.exe
-  dist\QsirchFloating\config.json
+  dist\PyQsirchgui\PyQsirchgui.exe
+  dist\PyQsirchgui\config.json
 
 Portable deployment:
-- Put the whole QsirchFloating folder on the share.
+- Put the whole PyQsirchgui folder on the share.
 - Create workstation shortcuts to that EXE.
 - Shared history defaults to history.json beside the EXE/config.
 - History is enabled by default and stores saved result records with hostname, local IPv4, last-used time, and use count.

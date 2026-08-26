@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
-echo Building Qsirch Floating Search v10.19...
+echo Building PyQsirchgui v10.19...
 echo.
 
 if not exist "config.json" (
@@ -16,31 +16,31 @@ py -3 -m pip install pyinstaller || exit /b 1
 
 if exist build rmdir /s /q build
 if exist dist rmdir /s /q dist
-if exist QsirchFloating.spec del /q QsirchFloating.spec
+if exist PyQsirchgui.spec del /q PyQsirchgui.spec
 
-py -3 -m PyInstaller --noconfirm --clean --onedir --windowed --name QsirchFloating qsirch_gui.py || exit /b 1
+py -3 -m PyInstaller --noconfirm --clean --onedir --windowed --name PyQsirchgui qsirch_gui.py || exit /b 1
 
-copy /Y "config.json" "dist\QsirchFloating\config.json" >nul || (
+copy /Y "config.json" "dist\PyQsirchgui\config.json" >nul || (
     echo ERROR: Failed to copy config.json into dist.
     exit /b 1
 )
 
-copy /Y "README.txt" "dist\QsirchFloating\README.txt" >nul
+copy /Y "README.txt" "dist\PyQsirchgui\README.txt" >nul
 
-if not exist "dist\QsirchFloating\QsirchFloating.exe" (
+if not exist "dist\PyQsirchgui\PyQsirchgui.exe" (
     echo ERROR: EXE was not generated.
     exit /b 1
 )
 
-if not exist "dist\QsirchFloating\config.json" (
+if not exist "dist\PyQsirchgui\config.json" (
     echo ERROR: config.json was not generated beside the EXE.
     exit /b 1
 )
 
 echo.
 echo SUCCESS
-echo   dist\QsirchFloating\QsirchFloating.exe
-echo   dist\QsirchFloating\config.json
+echo   dist\PyQsirchgui\PyQsirchgui.exe
+echo   dist\PyQsirchgui\config.json
 echo.
 echo The running UI should visibly show v10.19.
 pause
