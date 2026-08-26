@@ -1,7 +1,7 @@
 from pathlib import Path
 s = Path("qsirch_gui.py").read_text(encoding="utf-8")
 required = [
-    'APP_VERSION = "v10.19"',
+    'APP_VERSION = "v10.20"',
     'COMPACT_HEIGHT = 132',
     'self.hint=QLabel(',
     'hasattr(self, "hint")',
@@ -44,6 +44,8 @@ required = [
     'def show_search_help(self):',
     'def apply_window_layout_mode(self):',
     'self.preview_pixmap = None',
+    'QSizePolicy.Expanding',
+    'def set_preview_body_mode(self, mode):',
     'def scale_preview_image(self):',
     '"standard_window": True',
     'def local_file_preview(self, item):',
@@ -84,4 +86,4 @@ required = [
 missing = [x for x in required if x not in s]
 if missing:
     raise SystemExit("Missing required v10 source markers: " + repr(missing))
-print("v10.19 source verification passed.")
+print("v10.20 source verification passed.")

@@ -13,11 +13,11 @@ from PySide6.QtWidgets import (
     QSpinBox, QCheckBox, QFileDialog, QMessageBox, QMenu, QAbstractItemView,
     QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
     QComboBox, QSystemTrayIcon, QStyle, QProgressBar, QSplitter, QTextEdit,
-    QScrollArea, QDateEdit
+    QScrollArea, QDateEdit, QSizePolicy
 )
 
 APP_NAME = "PyQsirchgui"
-APP_VERSION = "v10.19"
+APP_VERSION = "v10.20"
 COMPACT_HEIGHT = 132
 UPSTREAM_REPO = "https://github.com/iios-co/qsirch"
 FORK_REPO = "https://github.com/senposage/qsirch-gui"
@@ -862,10 +862,7 @@ class HistoryStore:
             return []
         self.load()
         if mode == "__favorites__":
-            return [
-                x for x in self.entries
-                if bool(x.get("starred")) and (x.get("machineId") == self.machine_id or x.get("machine") == self.machine)
-            ]
+            return [x for x in self.entries if bool(x.get("starred"))]
         if mode == "__this__":
             return [x for x in self.entries if x.get("machine") == self.machine]
         if mode and mode not in ("__all__", "__this__"):
@@ -1898,14 +1895,17 @@ class Main(QWidget):
         self.preview_image.setObjectName("previewImage")
         self.preview_image.setAlignment(Qt.AlignCenter)
         self.preview_image.setMinimumSize(220, 220)
+        self.preview_image.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.preview_image.setScaledContents(False)
-        pp.addWidget(self.preview_image, 2)
+        pp.addWidget(self.preview_image, 1)
         self.preview_text = QTextEdit()
         self.preview_text.setObjectName("previewText")
         self.preview_text.setReadOnly(True)
         self.preview_text.setLineWrapMode(QTextEdit.WidgetWidth)
+        self.preview_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.preview_text.setPlainText("Select a result to preview.")
-        pp.addWidget(self.preview_text, 3)
+        pp.addWidget(self.preview_text, 1)
+        self.set_preview_body_mode("text")
 
         self.sidebar = QFrame()
         self.sidebar.setObjectName("sidebar")
@@ -2097,12 +2097,20 @@ class Main(QWidget):
             item = item.get("item", item)
         return item if isinstance(item, dict) else None
 
+    def set_preview_body_mode(self, mode):
+        show_image = mode == "image"
+        if hasattr(self, "preview_image"):
+            self.preview_image.setVisible(show_image)
+        if hasattr(self, "preview_text"):
+            self.preview_text.setVisible(not show_image)
+
     def selection_changed(self):
         if self.preview_visible:
             self.load_selected_preview()
 
     def clear_preview(self, text="Select a result to preview."):
         self.preview_pixmap = None
+        self.set_preview_body_mode("text")
         if hasattr(self, "preview_image"):
             self.preview_image.clear()
             self.preview_image.setText("")
@@ -2121,6 +2129,7 @@ class Main(QWidget):
         folder, file_name = result_display_parts(item, QsirchClient.path(item))
         self.preview_title.setText(file_name or "Preview")
         self.preview_pixmap = None
+        self.set_preview_body_mode("text")
         self.preview_image.clear()
         self.preview_text.setPlainText("Loading preview...")
         self.preview_request_id += 1
@@ -2214,18 +2223,28 @@ class Main(QWidget):
             pix = QPixmap(image_path)
             if not pix.isNull():
                 self.preview_pixmap = pix
+                self.set_preview_body_mode("image")
+                self.preview_image.setToolTip(data.get("summary") or "")
                 self.scale_preview_image()
             else:
-                self.preview_image.setText("Preview unavailable")
+                self.set_preview_body_mode("text")
+                self.preview_text.setPlainText("Preview unavailable")
+                return
         elif isinstance(thumb, dict) and thumb.get("content"):
             pix = QPixmap()
             if pix.loadFromData(thumb["content"]):
                 self.preview_pixmap = pix
+                self.set_preview_body_mode("image")
+                self.preview_image.setToolTip(data.get("summary") or "")
                 self.scale_preview_image()
             else:
-                self.preview_image.setText("Thumbnail unavailable")
+                self.set_preview_body_mode("text")
+                self.preview_text.setPlainText("Thumbnail unavailable")
+                return
         else:
-            self.preview_image.setText("No thumbnail")
+            self.set_preview_body_mode("text")
+            self.preview_text.setPlainText(data.get("summary") or "No preview available.")
+            return
         self.preview_text.setPlainText(data.get("summary") or "No preview available.")
 
     def scale_preview_image(self):
@@ -2241,6 +2260,7 @@ class Main(QWidget):
         self.scale_preview_image()
 
     def preview_failed(self, msg):
+        self.set_preview_body_mode("text")
         self.preview_image.clear()
         self.preview_text.setPlainText(msg or "Preview unavailable.")
 

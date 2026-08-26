@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
-echo Building PyQsirchgui v10.19...
+echo Building PyQsirchgui v10.20...
 echo.
 
 if not exist "config.json" (
@@ -42,5 +42,5 @@ echo SUCCESS
 echo   dist\PyQsirchgui\PyQsirchgui.exe
 echo   dist\PyQsirchgui\config.json
 echo.
-echo The running UI should visibly show v10.19.
+echo The running UI should visibly show v10.20.
 pause
