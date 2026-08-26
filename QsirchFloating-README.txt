@@ -1,5 +1,12 @@
 Qsirch Floating Search v10
 
+License and attribution:
+- This GUI is part of a fork of the upstream Qsirch CLI/API project:
+  https://github.com/iios-co/qsirch
+- Upstream CLI/API implementation copyright (c) 2026 IIOS Pty Ltd.
+- Upstream and GUI additions are distributed under the MIT License.
+- The PayPal donation button in Settings > About is optional donationware support and does not change the license.
+
 Build:
 Run build.bat.
 

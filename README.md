@@ -255,4 +255,12 @@ This client uses the QTS CGI login method:
 
 ## License
 
-MIT
+MIT.
+
+This repository is a fork of the upstream Qsirch CLI/API project:
+
+`https://github.com/iios-co/qsirch`
+
+The upstream CLI/API implementation is copyright (c) 2026 IIOS Pty Ltd and is licensed under the MIT License. The Windows floating GUI additions are distributed under the same MIT terms. See `LICENSE` and `NOTICE`.
+
+The GUI includes an optional PayPal donation button in Settings > About. Donation is voluntary and does not change the MIT license terms.

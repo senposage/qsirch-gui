@@ -18,6 +18,9 @@ from PySide6.QtWidgets import (
 APP_NAME = "Qsirch Floating Search"
 APP_VERSION = "v10.6"
 COMPACT_HEIGHT = 132
+UPSTREAM_REPO = "https://github.com/iios-co/qsirch"
+FORK_REPO = "https://github.com/senposage/qsirch-gui"
+DONATION_URL = "https://www.paypal.com/donate?business=rjc862003%40gmail.com&currency_code=USD"
 BASE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 CONFIG = BASE_DIR / "config.json"
 
@@ -849,6 +852,40 @@ class Settings(QDialog):
         hf.addRow("", import_machine)
         self.tabs.addTab(hist, "History")
 
+        about = QWidget()
+        av = QVBoxLayout(about)
+        av.setSpacing(10)
+        title = QLabel(f"{APP_NAME} {APP_VERSION}")
+        title.setObjectName("folderPath")
+        title.setWordWrap(True)
+        av.addWidget(title)
+        description = QLabel(
+            "Windows floating search app for QNAP Qsirch. This GUI builds on the "
+            "MIT-licensed upstream Qsirch CLI/API implementation."
+        )
+        description.setWordWrap(True)
+        av.addWidget(description)
+        upstream = QLabel(f"Upstream CLI/API project: {UPSTREAM_REPO}")
+        upstream.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        upstream.setWordWrap(True)
+        av.addWidget(upstream)
+        fork = QLabel(f"GUI fork: {FORK_REPO}")
+        fork.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        fork.setWordWrap(True)
+        av.addWidget(fork)
+        license_note = QLabel(
+            "License: MIT. Original upstream copyright belongs to IIOS Pty Ltd. "
+            "GUI additions are distributed under the same MIT terms."
+        )
+        license_note.setWordWrap(True)
+        av.addWidget(license_note)
+        donate = QPushButton("Donate via PayPal")
+        donate.setToolTip("Open PayPal donation page")
+        donate.clicked.connect(self.open_donation)
+        av.addWidget(donate)
+        av.addStretch()
+        self.tabs.addTab(about, "About")
+
         buttons = QHBoxLayout()
         buttons.addStretch()
         cancel = QPushButton("Cancel")
@@ -983,6 +1020,9 @@ class Settings(QDialog):
             count = parent.history.import_machine_to_current(source)
             parent.refresh_history_view()
             QMessageBox.information(self, "History imported", f"Imported {count:,} saved result entries from {source}.")
+
+    def open_donation(self):
+        QDesktopServices.openUrl(QUrl(DONATION_URL))
 
     @staticmethod
     def remove_selected(widget):
