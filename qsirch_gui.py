@@ -1,4 +1,4 @@
-import sys, os, base64, json, webbrowser, fnmatch, subprocess, socket, uuid, tempfile, ctypes
+import sys, os, base64, json, webbrowser, fnmatch, subprocess, socket, uuid, tempfile, ctypes, html, re
 from ctypes import wintypes
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "Qsirch Floating Search"
-APP_VERSION = "v10.4"
+APP_VERSION = "v10.6"
 COMPACT_HEIGHT = 132
 BASE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 CONFIG = BASE_DIR / "config.json"
@@ -177,10 +177,32 @@ def history_defaults(cfg):
 
 def behavior_defaults(cfg):
     raw = cfg.get("behavior", {}) or {}
+    theme = str(raw.get("theme", "system") or "system").lower()
+    if theme not in ("system", "light", "dark"):
+        theme = "system"
     return {
         "show_in_taskbar": bool(raw.get("show_in_taskbar", raw.get("showInTaskbar", True))),
         "global_hotkey": str(raw.get("global_hotkey", raw.get("globalHotkey", "Ctrl+Space")) or "Ctrl+Space"),
+        "theme": theme,
+        "highlight_matches": bool(raw.get("highlight_matches", raw.get("highlightMatches", True))),
     }
+
+def windows_prefers_dark():
+    if sys.platform != "win32":
+        return False
+    try:
+        import winreg
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+        value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+        return int(value) == 0
+    except Exception:
+        return False
+
+def resolved_theme(cfg):
+    theme = behavior_defaults(cfg)["theme"]
+    if theme == "system":
+        return "dark" if windows_prefers_dark() else "light"
+    return theme
 
 def normalise_hotkey_text(text):
     parts = [p.strip() for p in str(text or "").replace("-", "+").split("+") if p.strip()]
@@ -251,6 +273,146 @@ def display_path(path, max_line=92):
     if current:
         lines.append(current)
     return "\n".join(lines)
+
+def result_display_parts(item, fallback_path=""):
+    name = str(item.get("name", "") or "")
+    ext = str(item.get("extension", "") or "")
+    file_name = name
+    if ext and file_name and not file_name.lower().endswith("." + ext.lower()):
+        file_name = f"{file_name}.{ext}"
+    full_path = str(fallback_path or QsirchClient.path(item) or "")
+    folder = full_path
+    if file_name and folder.lower().endswith(file_name.lower()):
+        folder = folder[:-len(file_name)].rstrip("\\/")
+    return folder, file_name or full_path
+
+def highlight_text(text, query, enabled):
+    text = str(text or "")
+    if not enabled:
+        return html.escape(text).replace("\n", "<br>")
+    query = str(query or "").strip()
+    if not query:
+        return html.escape(text).replace("\n", "<br>")
+    terms = [x for x in re.split(r"\s+", query) if len(x) > 1]
+    if not terms:
+        return html.escape(text).replace("\n", "<br>")
+    pattern = re.compile("(" + "|".join(re.escape(x) for x in terms) + ")", re.IGNORECASE)
+    pieces = []
+    pos = 0
+    for match in pattern.finditer(text):
+        pieces.append(html.escape(text[pos:match.start()]))
+        pieces.append(f"<mark>{html.escape(match.group(0))}</mark>")
+        pos = match.end()
+    pieces.append(html.escape(text[pos:]))
+    return "".join(pieces).replace("\n", "<br>")
+
+def main_stylesheet(cfg):
+    if resolved_theme(cfg) == "light":
+        return """
+        QWidget { color:#1f2328; }
+        #card { background:#f7f8fa; border:1px solid #c9d1d9; border-radius:12px; }
+        QLineEdit {
+            background:#ffffff; color:#1f2328; border:1px solid #b8c0cc;
+            border-radius:8px; padding:9px 12px; font-size:15px;
+        }
+        QLineEdit:focus { border:1px solid #0969da; background:#ffffff; }
+        QComboBox {
+            background:#ffffff; color:#1f2328; border:1px solid #b8c0cc;
+            border-radius:7px; padding:5px 8px; font-size:12px;
+        }
+        QPushButton {
+            background:#eef1f4; color:#1f2328; border:1px solid #b8c0cc;
+            border-radius:7px; padding:7px 10px; font-size:12px;
+        }
+        QPushButton:hover { background:#e2e7ee; }
+        QPushButton:pressed { background:#d7dde5; }
+        QPushButton:disabled { color:#8c959f; background:#eef1f4; }
+        QPushButton#pinButton:checked { background:#dbeafe; border-color:#60a5fa; color:#0f172a; }
+        QPushButton#exitButton:hover { background:#fee2e2; border-color:#fca5a5; }
+        QLabel#versionBadge {
+            color:#57606a; background:#eef1f4; border:1px solid #c9d1d9;
+            border-radius:7px; padding:6px 9px; font-size:12px;
+        }
+        QListWidget {
+            background:#ffffff; color:#1f2328; border:1px solid #c9d1d9;
+            border-radius:8px; font-size:13px; padding:4px;
+        }
+        QListWidget::item { padding:0; border-bottom:1px solid #d8dee4; }
+        QListWidget::item:selected { background:#dbeafe; border-radius:6px; }
+        QLabel { color:#24292f; }
+        QLabel#folderPath { color:#0f172a; font-size:13px; font-weight:600; }
+        QLabel#fileName { color:#4b5563; font-size:12px; }
+        mark { background:#fff3a3; color:#0f172a; }
+        #hint { color:#6e7781; font-size:12px; }
+        """
+    return """
+        QWidget { color:#e7e9eb; }
+        #card { background:#202124; border:1px solid #3b3d42; border-radius:12px; }
+        QLineEdit {
+            background:#2b2c30; color:#f5f6f7; border:1px solid #4a4d54;
+            border-radius:8px; padding:9px 12px; font-size:15px;
+        }
+        QLineEdit:focus { border:1px solid #76a9ff; background:#303238; }
+        QComboBox {
+            background:#2b2c30; color:#e9eaec; border:1px solid #4a4d54;
+            border-radius:7px; padding:5px 8px; font-size:12px;
+        }
+        QPushButton {
+            background:#2f3136; color:#eceef1; border:1px solid #4a4d54;
+            border-radius:7px; padding:7px 10px; font-size:12px;
+        }
+        QPushButton:hover { background:#393c42; }
+        QPushButton:pressed { background:#24262a; }
+        QPushButton:disabled { color:#777c84; background:#282a2e; }
+        QPushButton#pinButton:checked { background:#28456f; border-color:#5f91d6; color:#ffffff; }
+        QPushButton#exitButton:hover { background:#7a3030; border-color:#985151; }
+        QLabel#versionBadge {
+            color:#aeb4bb; background:#282a2e; border:1px solid #3f4248;
+            border-radius:7px; padding:6px 9px; font-size:12px;
+        }
+        QListWidget {
+            background:#191a1d; color:#e7e9eb; border:1px solid #303238;
+            border-radius:8px; font-size:13px; padding:4px;
+        }
+        QListWidget::item { padding:0; border-bottom:1px solid #282a2e; }
+        QListWidget::item:selected { background:#26364d; border-radius:6px; }
+        QLabel { color:#dce1e6; }
+        QLabel#folderPath { color:#f1f4f7; font-size:13px; font-weight:600; }
+        QLabel#fileName { color:#c8d0d8; font-size:12px; }
+        mark { background:#7c5f16; color:#fff7cc; }
+        #hint { color:#858b94; font-size:12px; }
+        """
+
+def settings_stylesheet(cfg):
+    if resolved_theme(cfg) == "light":
+        return """
+        QDialog, QWidget { background: #f7f8fa; color: #1f2328; }
+        QTabWidget::pane { border: 1px solid #c9d1d9; background: #f7f8fa; }
+        QTabBar::tab { background: #eef1f4; color: #24292f; padding: 9px 14px; border: 1px solid #c9d1d9; border-bottom: none; }
+        QTabBar::tab:selected { background: #ffffff; color: #0f172a; }
+        QLineEdit, QSpinBox, QListWidget, QTableWidget, QComboBox { background: #ffffff; color: #1f2328; border: 1px solid #b8c0cc; border-radius: 6px; selection-background-color: #dbeafe; }
+        QHeaderView::section { background: #eef1f4; color: #24292f; border: 1px solid #c9d1d9; padding: 6px; }
+        QPushButton { background: #eef1f4; color: #1f2328; border: 1px solid #b8c0cc; border-radius: 7px; padding: 7px 12px; }
+        QPushButton:hover { background: #e2e7ee; }
+        QGroupBox { border: 1px solid #c9d1d9; border-radius: 8px; margin-top: 10px; padding-top: 10px; }
+        QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: #24292f; }
+        QCheckBox { color: #1f2328; }
+        QLabel { color: #24292f; }
+        """
+    return """
+        QDialog, QWidget { background: #15171a; color: #e7e9eb; }
+        QTabWidget::pane { border: 1px solid #30343a; background: #15171a; }
+        QTabBar::tab { background: #22262b; color: #cfd3d8; padding: 9px 14px; border: 1px solid #30343a; border-bottom: none; }
+        QTabBar::tab:selected { background: #2b3138; color: #ffffff; }
+        QLineEdit, QSpinBox, QListWidget, QTableWidget, QComboBox { background: #101214; color: #f0f2f4; border: 1px solid #3a4048; border-radius: 6px; selection-background-color: #26364d; }
+        QHeaderView::section { background: #22262b; color: #d8dbe0; border: 1px solid #30343a; padding: 6px; }
+        QPushButton { background: #252a30; color: #e7e9eb; border: 1px solid #3a4048; border-radius: 7px; padding: 7px 12px; }
+        QPushButton:hover { background: #30363d; }
+        QGroupBox { border: 1px solid #30343a; border-radius: 8px; margin-top: 10px; padding-top: 10px; }
+        QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: #d7dbe0; }
+        QCheckBox { color: #e7e9eb; }
+        QLabel { color: #c7ccd2; }
+        """
 
 class HistoryStore:
     def __init__(self, cfg):
@@ -536,64 +698,7 @@ class Settings(QDialog):
         self.cfg = json.loads(json.dumps(cfg))
         self.setWindowTitle(f"Qsirch Floating Search Settings {APP_VERSION}")
         self.resize(720, 560)
-        self.setStyleSheet("""
-        QDialog, QWidget {
-            background: #15171a;
-            color: #e7e9eb;
-        }
-        QTabWidget::pane {
-            border: 1px solid #30343a;
-            background: #15171a;
-        }
-        QTabBar::tab {
-            background: #22262b;
-            color: #cfd3d8;
-            padding: 9px 14px;
-            border: 1px solid #30343a;
-            border-bottom: none;
-        }
-        QTabBar::tab:selected {
-            background: #2b3138;
-            color: #ffffff;
-        }
-        QLineEdit, QSpinBox, QListWidget, QTableWidget, QComboBox {
-            background: #101214;
-            color: #f0f2f4;
-            border: 1px solid #3a4048;
-            border-radius: 6px;
-            selection-background-color: #26364d;
-        }
-        QHeaderView::section {
-            background: #22262b;
-            color: #d8dbe0;
-            border: 1px solid #30343a;
-            padding: 6px;
-        }
-        QPushButton {
-            background: #252a30;
-            color: #e7e9eb;
-            border: 1px solid #3a4048;
-            border-radius: 7px;
-            padding: 7px 12px;
-        }
-        QPushButton:hover {
-            background: #30363d;
-        }
-        QGroupBox {
-            border: 1px solid #30343a;
-            border-radius: 8px;
-            margin-top: 10px;
-            padding-top: 10px;
-        }
-        QGroupBox::title {
-            subcontrol-origin: margin;
-            left: 10px;
-            padding: 0 4px;
-            color: #d7dbe0;
-        }
-        QCheckBox { color: #e7e9eb; }
-        QLabel { color: #c7ccd2; }
-        """)
+        self.setStyleSheet(settings_stylesheet(self.cfg))
 
         root = QVBoxLayout(self)
         self.tabs = QTabWidget()
@@ -629,6 +734,14 @@ class Settings(QDialog):
         bcfg = behavior_defaults(self.cfg)
         self.show_taskbar = QCheckBox("Show the main window in the Windows taskbar")
         self.show_taskbar.setChecked(bcfg["show_in_taskbar"])
+        self.theme_choice = QComboBox()
+        self.theme_choice.addItem("Use Windows setting", "system")
+        self.theme_choice.addItem("Light", "light")
+        self.theme_choice.addItem("Dark", "dark")
+        theme_idx = self.theme_choice.findData(bcfg["theme"])
+        self.theme_choice.setCurrentIndex(theme_idx if theme_idx >= 0 else 0)
+        self.highlight_matches = QCheckBox("Highlight matching text in results")
+        self.highlight_matches.setChecked(bcfg["highlight_matches"])
         self.hotkey_edit = ShortcutEdit(normalise_hotkey_text(bcfg["global_hotkey"]))
         self.hotkey_edit.setPlaceholderText("Ctrl+Space")
         self.hotkey_warning = QLabel("")
@@ -637,6 +750,8 @@ class Settings(QDialog):
         if getattr(parent, "hotkey_warning", ""):
             self.hotkey_warning.setText(parent.hotkey_warning)
         bf.addRow("", self.show_taskbar)
+        bf.addRow("Theme", self.theme_choice)
+        bf.addRow("", self.highlight_matches)
         bf.addRow("Hide / unhide shortcut", self.hotkey_edit)
         bf.addRow("", self.hotkey_warning)
         self.tabs.addTab(behavior, "Appearance / Behavior")
@@ -906,6 +1021,8 @@ class Settings(QDialog):
             "behavior": {
                 "show_in_taskbar": self.show_taskbar.isChecked(),
                 "global_hotkey": hotkey_text,
+                "theme": self.theme_choice.currentData() or "system",
+                "highlight_matches": self.highlight_matches.isChecked(),
             },
             "history": {
                 "enabled": self.history_enabled.isChecked(),
@@ -990,7 +1107,7 @@ class Main(QWidget):
                     ]
                 },
                 "history": {"enabled": True, "file": "history.json", "max_entries": 200},
-                "behavior": {"show_in_taskbar": True, "global_hotkey": "Ctrl+Space"},
+                "behavior": {"show_in_taskbar": True, "global_hotkey": "Ctrl+Space", "theme": "system", "highlight_matches": True},
                 "always_on_top": True
             }
 
@@ -1105,39 +1222,7 @@ class Main(QWidget):
         v.addWidget(self.busy)
 
     def apply_style(self):
-        self.setStyleSheet("""
-        #card { background:#202124; border:1px solid #3b3d42; border-radius:12px; }
-        QLineEdit {
-            background:#2b2c30; color:#f5f6f7; border:1px solid #4a4d54;
-            border-radius:8px; padding:9px 12px; font-size:15px;
-        }
-        QLineEdit:focus { border:1px solid #76a9ff; background:#303238; }
-        QComboBox {
-            background:#2b2c30; color:#e9eaec; border:1px solid #4a4d54;
-            border-radius:7px; padding:5px 8px; font-size:12px;
-        }
-        QPushButton {
-            background:#2f3136; color:#eceef1; border:1px solid #4a4d54;
-            border-radius:7px; padding:7px 10px; font-size:12px;
-        }
-        QPushButton:hover { background:#393c42; }
-        QPushButton:pressed { background:#24262a; }
-        QPushButton:disabled { color:#777c84; background:#282a2e; }
-        QPushButton#pinButton:checked { background:#28456f; border-color:#5f91d6; color:#ffffff; }
-        QPushButton#exitButton:hover { background:#7a3030; border-color:#985151; }
-        QLabel#versionBadge {
-            color:#aeb4bb; background:#282a2e; border:1px solid #3f4248;
-            border-radius:7px; padding:6px 9px; font-size:12px;
-        }
-        QListWidget {
-            background:#191a1d; color:#e7e9eb; border:1px solid #303238;
-            border-radius:8px; font-size:13px; padding:4px;
-        }
-        QListWidget::item { padding:0; border-bottom:1px solid #282a2e; }
-        QListWidget::item:selected { background:#26364d; border-radius:6px; }
-        QLabel { color:#bcc2ca; }
-        #hint { color:#858b94; font-size:12px; }
-        """)
+        self.setStyleSheet(main_stylesheet(self.cfg))
 
     def apply_window_flags(self):
         flags = Qt.Window | Qt.FramelessWindowHint
@@ -1153,6 +1238,7 @@ class Main(QWidget):
         taskbar_changed = self.show_in_taskbar != bcfg["show_in_taskbar"]
         self.behavior = bcfg
         self.show_in_taskbar = bool(bcfg["show_in_taskbar"])
+        self.apply_style()
         if taskbar_changed:
             self.apply_window_flags()
             if was_visible:
@@ -1316,21 +1402,24 @@ class Main(QWidget):
                 if ext and name and not str(name).lower().endswith("." + str(ext).lower()):
                     name = f"{name}.{ext}"
                 path = entry.get("path") or QsirchClient.path(item)
+                folder, file_name = result_display_parts(item, path)
                 machine = entry.get("machine", "")
                 ip = entry.get("ip", "")
                 used = entry.get("lastUsed", "")
                 meta_parts = [x for x in (machine, ip, used) if x]
-                meta = display_path(path) + ("\n" + "  |  ".join(meta_parts) if meta_parts else "")
+                meta = str(file_name or name or "Saved result") + ("\n" + "  |  ".join(meta_parts) if meta_parts else "")
                 li = QListWidgetItem()
                 li.setData(Qt.UserRole, {"_history": True, "item": item})
                 row = QWidget()
                 rh = QVBoxLayout(row)
                 rh.setContentsMargins(10, 7, 10, 7)
                 rh.setSpacing(3)
-                title = QLabel(str(name or path or "Saved result"))
+                title = QLabel(display_path(folder))
+                title.setObjectName("folderPath")
                 title.setTextInteractionFlags(Qt.TextSelectableByMouse)
+                title.setWordWrap(True)
                 detail = QLabel(meta)
-                detail.setObjectName("hint")
+                detail.setObjectName("fileName")
                 detail.setTextInteractionFlags(Qt.TextSelectableByMouse)
                 detail.setWordWrap(True)
                 rh.addWidget(title)
@@ -1455,10 +1544,11 @@ class Main(QWidget):
 
     def render_results(self, server_total, hidden=0, status_text="Ready"):
         self.list.clear()
+        query = self.search.text().strip()
+        do_highlight = behavior_defaults(self.cfg)["highlight_matches"]
         for item in self.results:
-            name=item.get("name","")
-            ext=item.get("extension","")
             path=QsirchClient.path(item)
+            folder, file_name = result_display_parts(item, path)
             size=item.get("size",0)
             try: size=f"{int(size)/1048576:.1f} MB" if int(size)>1048576 else f"{int(size)/1024:.0f} KB"
             except: size=""
@@ -1472,15 +1562,19 @@ class Main(QWidget):
             iv=QVBoxLayout(info_box)
             iv.setContentsMargins(0,0,0,0)
             iv.setSpacing(3)
-            title_text = f"{name}{('.'+ext) if ext else ''}"
-            title=QLabel(title_text)
+            title=QLabel()
+            title.setObjectName("folderPath")
+            title.setTextFormat(Qt.RichText)
+            title.setText(highlight_text(display_path(folder), query, do_highlight))
             title.setTextInteractionFlags(Qt.TextSelectableByMouse)
             title.setWordWrap(True)
-            detail_text = display_path(path)
+            detail_text = str(file_name)
             if size:
                 detail_text += f"\n{size}"
-            detail=QLabel(detail_text)
-            detail.setObjectName("hint")
+            detail=QLabel()
+            detail.setObjectName("fileName")
+            detail.setTextFormat(Qt.RichText)
+            detail.setText(highlight_text(detail_text, query, do_highlight))
             detail.setTextInteractionFlags(Qt.TextSelectableByMouse)
             detail.setWordWrap(True)
             iv.addWidget(title)

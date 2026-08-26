@@ -12,7 +12,9 @@
   },
   "behavior": {
     "show_in_taskbar": true,
-    "global_hotkey": "Ctrl+Space"
+    "global_hotkey": "Ctrl+Space",
+    "theme": "system",
+    "highlight_matches": true
   },
   "always_on_top": true,
   "exclude": {
