@@ -9,22 +9,39 @@
   "visibility_rules": [],
   "history": {
     "enabled": true,
-    "file": "history.json",
-    "max_entries": 200,
+    "file": "data\\history.json",
+    "max_entries": 20000,
     "source_filter": "__this__"
   },
   "behavior": {
     "show_in_taskbar": true,
+    "minimize_to_tray": false,
+    "clear_results_with_query": false,
     "global_hotkey": "Ctrl+Space",
     "theme": "system",
     "highlight_matches": true,
+    "use_qsirch_thumbnails": false,
+    "search_contents": false,
     "preview_pane": false,
-    "standard_window": true,
     "allow_download": false,
+    "refresh_cache_on_startup": false,
     "folders_first": true,
-    "result_view": "details"
+    "result_view": "details",
+    "result_sort": "recent:desc",
+    "search_timeout_seconds": 90,
+    "first_page_size": 25,
+    "next_page_size": 100,
+    "visible_detail_columns": [
+      "location",
+      "name",
+      "modified",
+      "size",
+      "type"
+    ]
   },
   "always_on_top": true,
+  "pinned_tabs": [],
+  "hosts": {},
   "exclude": {
     "folders": [
       "@Recently-Snapshot\\*",

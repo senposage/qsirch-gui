@@ -1,7 +1,9 @@
 using System.Collections.ObjectModel;
 using System.Windows.Controls;
 using System.Windows;
+using System.Windows.Input;
 using PyQsirchgui.Windows.Models;
+using PyQsirchgui.Windows.Services;
 
 namespace PyQsirchgui.Windows;
 
@@ -12,16 +14,66 @@ public partial class SettingsWindow : Window
     public SettingsWindow(AppConfig config)
     {
         InitializeComponent();
+        StateChanged += (_, _) => UpdateCaptionButtons();
         _config = config;
+        ThemePalette.Apply(Resources, string.IsNullOrWhiteSpace(_config.Behavior.Theme) ? "system" : _config.Behavior.Theme);
         Mappings = new ObservableCollection<PathMapping>(_config.PathMappings.Select(x => new PathMapping { ShareRoot = x.ShareRoot, MappedRoot = x.MappedRoot }));
-        FolderRules = new ObservableCollection<TextRule>(_config.Exclude.Folders.Select(x => new TextRule { Pattern = x }));
-        FileRules = new ObservableCollection<TextRule>(_config.Exclude.Files.Select(x => new TextRule { Pattern = x }));
+        FolderRules = new ObservableCollection<TextRule>(_config.Exclude.FolderRules.Select(x => new TextRule { Pattern = x.Pattern, IsGlobal = x.IsGlobal }));
+        FileRules = new ObservableCollection<TextRule>(_config.Exclude.FileRules.Select(x => new TextRule { Pattern = x.Pattern, IsGlobal = x.IsGlobal }));
         VisibilityRules = new ObservableCollection<VisibilityRule>(_config.VisibilityRules.Select(CloneVisibilityRule));
         MappingsGrid.ItemsSource = Mappings;
         FolderRulesGrid.ItemsSource = FolderRules;
         FileRulesGrid.ItemsSource = FileRules;
         VisibilityRulesGrid.ItemsSource = VisibilityRules;
         LoadValues();
+    }
+
+    private void TitleBarMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ClickCount == 2)
+        {
+            ToggleMaximizeRestore();
+            return;
+        }
+
+        try
+        {
+            DragMove();
+        }
+        catch
+        {
+        }
+    }
+
+    private void MinimizeClicked(object sender, RoutedEventArgs e)
+    {
+        WindowState = WindowState.Minimized;
+    }
+
+    private void MaximizeRestoreClicked(object sender, RoutedEventArgs e)
+    {
+        ToggleMaximizeRestore();
+    }
+
+    private void CloseClicked(object sender, RoutedEventArgs e)
+    {
+        Close();
+    }
+
+    private void ToggleMaximizeRestore()
+    {
+        WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+        UpdateCaptionButtons();
+    }
+
+    private void UpdateCaptionButtons()
+    {
+        if (MaximizeButton == null)
+        {
+            return;
+        }
+        MaximizeButton.Content = WindowState == WindowState.Maximized ? "\uE923" : "\uE922";
+        MaximizeButton.ToolTip = WindowState == WindowState.Maximized ? "Restore" : "Maximize";
     }
 
     public ObservableCollection<PathMapping> Mappings { get; }
@@ -40,15 +92,23 @@ public partial class SettingsWindow : Window
         SslBox.IsChecked = _config.Ssl;
         SslVerifyBox.IsChecked = _config.SslVerify;
         TaskbarBox.IsChecked = _config.Behavior.ShowInTaskbar;
-        StandardWindowBox.IsChecked = _config.Behavior.StandardWindow;
+        MinimizeToTrayBox.IsChecked = _config.Behavior.MinimizeToTray;
+        ClearResultsWithQueryBox.IsChecked = _config.Behavior.ClearResultsWithQuery;
         AlwaysOnTopBox.IsChecked = _config.AlwaysOnTop;
         FoldersFirstBox.IsChecked = _config.Behavior.FoldersFirst;
+        SearchContentsBox.IsChecked = _config.Behavior.SearchContents;
         HighlightMatchesBox.IsChecked = _config.Behavior.HighlightMatches;
+        QsirchThumbnailsBox.IsChecked = _config.Behavior.UseQsirchThumbnails;
         PreviewPaneBox.IsChecked = _config.Behavior.PreviewPane;
         AllowDownloadBox.IsChecked = _config.Behavior.AllowDownload;
+        RefreshCacheBox.IsChecked = _config.Behavior.RefreshCacheOnStartup;
         SelectTaggedItem(ThemeBox, string.IsNullOrWhiteSpace(_config.Behavior.Theme) ? "system" : _config.Behavior.Theme);
         SelectTaggedItem(ResultViewBox, string.IsNullOrWhiteSpace(_config.Behavior.ResultView) ? "details" : _config.Behavior.ResultView);
+        SelectTaggedItem(ResultSortBox, FirstSortKey(_config.Behavior.ResultSort));
         HotkeyBox.Text = string.IsNullOrWhiteSpace(_config.Behavior.GlobalHotkey) ? "Ctrl+Space" : _config.Behavior.GlobalHotkey;
+        SearchTimeoutBox.Text = Math.Clamp(_config.Behavior.SearchTimeoutSeconds, 15, 300).ToString();
+        FirstPageSizeBox.Text = Math.Clamp(_config.Behavior.FirstPageSize, 5, 500).ToString();
+        NextPageSizeBox.Text = Math.Clamp(_config.Behavior.NextPageSize, 10, 500).ToString();
         HistoryEnabledBox.IsChecked = _config.History.Enabled;
         HistoryFileBox.Text = _config.History.File;
         HistoryMaxBox.Text = _config.History.MaxEntries.ToString();
@@ -67,6 +127,21 @@ public partial class SettingsWindow : Window
             MessageBox.Show(this, "Maximum history entries must be at least 1.", "Settings", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
+        if (!int.TryParse(SearchTimeoutBox.Text.Trim(), out var searchTimeout) || searchTimeout is < 15 or > 300)
+        {
+            MessageBox.Show(this, "Qsirch timeout must be from 15 to 300 seconds.", "Settings", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        if (!int.TryParse(FirstPageSizeBox.Text.Trim(), out var firstPageSize) || firstPageSize is < 5 or > 500)
+        {
+            MessageBox.Show(this, "First result page size must be from 5 to 500.", "Settings", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        if (!int.TryParse(NextPageSizeBox.Text.Trim(), out var nextPageSize) || nextPageSize is < 10 or > 500)
+        {
+            MessageBox.Show(this, "Next result page size must be from 10 to 500.", "Settings", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
 
         CommitTableEdits();
         _config.Host = HostBox.Text.Trim();
@@ -76,22 +151,42 @@ public partial class SettingsWindow : Window
         _config.Ssl = SslBox.IsChecked == true;
         _config.SslVerify = SslVerifyBox.IsChecked == true;
         _config.Behavior.ShowInTaskbar = TaskbarBox.IsChecked == true;
-        _config.Behavior.StandardWindow = StandardWindowBox.IsChecked == true;
+        _config.Behavior.MinimizeToTray = MinimizeToTrayBox.IsChecked == true;
+        _config.Behavior.ClearResultsWithQuery = ClearResultsWithQueryBox.IsChecked == true;
         _config.AlwaysOnTop = AlwaysOnTopBox.IsChecked == true;
         _config.Behavior.FoldersFirst = FoldersFirstBox.IsChecked == true;
+        _config.Behavior.SearchContents = SearchContentsBox.IsChecked == true;
         _config.Behavior.HighlightMatches = HighlightMatchesBox.IsChecked == true;
+        _config.Behavior.UseQsirchThumbnails = QsirchThumbnailsBox.IsChecked == true;
         _config.Behavior.PreviewPane = PreviewPaneBox.IsChecked == true;
         _config.Behavior.AllowDownload = AllowDownloadBox.IsChecked == true;
+        _config.Behavior.RefreshCacheOnStartup = RefreshCacheBox.IsChecked == true;
         _config.Behavior.Theme = SelectedTag(ThemeBox, "system");
         _config.Behavior.ResultView = SelectedTag(ResultViewBox, "details");
+        _config.Behavior.ResultSort = SelectedTag(ResultSortBox, "recent");
         _config.Behavior.GlobalHotkey = string.IsNullOrWhiteSpace(HotkeyBox.Text) ? "Ctrl+Space" : HotkeyBox.Text.Trim();
+        _config.Behavior.SearchTimeoutSeconds = searchTimeout;
+        _config.Behavior.FirstPageSize = firstPageSize;
+        _config.Behavior.NextPageSize = nextPageSize;
         _config.History.Enabled = HistoryEnabledBox.IsChecked == true;
-        _config.History.File = string.IsNullOrWhiteSpace(HistoryFileBox.Text) ? "history.json" : HistoryFileBox.Text.Trim();
+        _config.History.File = string.IsNullOrWhiteSpace(HistoryFileBox.Text) ? "data\\history.json" : HistoryFileBox.Text.Trim();
         _config.History.MaxEntries = maxEntries;
         _config.History.SourceFilter = SelectedTag(HistorySourceBox, "__this__");
         _config.PathMappings = Mappings.Where(x => !string.IsNullOrWhiteSpace(x.ShareRoot) && !string.IsNullOrWhiteSpace(x.MappedRoot)).ToList();
-        _config.Exclude.Folders = FolderRules.Select(x => x.Pattern.Trim()).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        _config.Exclude.Files = FileRules.Select(x => x.Pattern.Trim()).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        _config.Exclude.FolderRules = FolderRules
+            .Select(x => new ScopedTextRule { Pattern = x.Pattern.Trim(), IsGlobal = x.IsGlobal })
+            .Where(x => !string.IsNullOrWhiteSpace(x.Pattern))
+            .GroupBy(x => x.Pattern, StringComparer.OrdinalIgnoreCase)
+            .Select(x => x.First())
+            .ToList();
+        _config.Exclude.FileRules = FileRules
+            .Select(x => new ScopedTextRule { Pattern = x.Pattern.Trim(), IsGlobal = x.IsGlobal })
+            .Where(x => !string.IsNullOrWhiteSpace(x.Pattern))
+            .GroupBy(x => x.Pattern, StringComparer.OrdinalIgnoreCase)
+            .Select(x => x.First())
+            .ToList();
+        _config.Exclude.Folders = _config.Exclude.FolderRules.Select(x => x.Pattern).ToList();
+        _config.Exclude.Files = _config.Exclude.FileRules.Select(x => x.Pattern).ToList();
         _config.VisibilityRules = VisibilityRules
             .Where(x => !string.IsNullOrWhiteSpace(x.Pattern))
             .Select(x => new VisibilityRule
@@ -99,6 +194,7 @@ public partial class SettingsWindow : Window
                 Access = NormalizeAccess(x.Access),
                 Identity = string.IsNullOrWhiteSpace(x.Identity) ? "*" : x.Identity.Trim(),
                 Pattern = x.Pattern.Trim(),
+                IsGlobal = x.IsGlobal,
             })
             .ToList();
         ClearHistoryRequested = ClearHistoryBox.IsChecked == true;
@@ -113,7 +209,7 @@ public partial class SettingsWindow : Window
 
     private void AddFolderRuleClicked(object sender, RoutedEventArgs e)
     {
-        FolderRules.Add(new TextRule { Pattern = "*" });
+        FolderRules.Add(new TextRule { Pattern = "*", IsGlobal = false });
         FolderRulesGrid.SelectedIndex = FolderRules.Count - 1;
         FolderRulesGrid.ScrollIntoView(FolderRulesGrid.SelectedItem);
     }
@@ -125,7 +221,7 @@ public partial class SettingsWindow : Window
 
     private void AddFileRuleClicked(object sender, RoutedEventArgs e)
     {
-        FileRules.Add(new TextRule { Pattern = "*" });
+        FileRules.Add(new TextRule { Pattern = "*", IsGlobal = false });
         FileRulesGrid.SelectedIndex = FileRules.Count - 1;
         FileRulesGrid.ScrollIntoView(FileRulesGrid.SelectedItem);
     }
@@ -137,7 +233,7 @@ public partial class SettingsWindow : Window
 
     private void AddVisibilityRuleClicked(object sender, RoutedEventArgs e)
     {
-        VisibilityRules.Add(new VisibilityRule { Access = "deny", Identity = "*", Pattern = "*" });
+        VisibilityRules.Add(new VisibilityRule { Access = "deny", Identity = "*", Pattern = "*", IsGlobal = false });
         VisibilityRulesGrid.SelectedIndex = VisibilityRules.Count - 1;
         VisibilityRulesGrid.ScrollIntoView(VisibilityRulesGrid.SelectedItem);
     }
@@ -171,6 +267,7 @@ public partial class SettingsWindow : Window
             Access = NormalizeAccess(rule.Access),
             Identity = string.IsNullOrWhiteSpace(rule.Identity) ? "*" : rule.Identity,
             Pattern = rule.Pattern,
+            IsGlobal = rule.IsGlobal,
         };
     }
 
@@ -196,9 +293,20 @@ public partial class SettingsWindow : Window
     {
         return (box.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? fallback;
     }
+
+    private static string FirstSortKey(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "recent";
+        }
+        var first = value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault() ?? "recent";
+        return first.Split(':', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault() ?? "recent";
+    }
 }
 
 public sealed class TextRule
 {
     public string Pattern { get; set; } = "";
+    public bool IsGlobal { get; set; }
 }

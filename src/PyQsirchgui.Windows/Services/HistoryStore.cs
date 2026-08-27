@@ -7,6 +7,8 @@ namespace PyQsirchgui.Windows.Services;
 public sealed class HistoryStore(AppConfig config)
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    private readonly object _gate = new();
+    private List<HistoryEntry>? _entries;
 
     public IReadOnlyList<SearchResult> Favorites()
     {
@@ -33,6 +35,21 @@ public sealed class HistoryStore(AppConfig config)
             .Where(entry => MatchesMode(entry, mode))
             .Where(entry => $"{entry.Name} {entry.Extension} {entry.Path}".Contains(needle, StringComparison.OrdinalIgnoreCase))
             .Select(entry => entry.ToSearchResult())
+            .Pipe(SortFoldersFirst);
+    }
+
+    public IReadOnlyList<SearchResult> CachedResults(string text)
+    {
+        var needle = (text ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(needle) || !config.History.Enabled)
+        {
+            return [];
+        }
+
+        return Entries()
+            .Where(entry => $"{entry.Name} {entry.Extension} {entry.Path}".Contains(needle, StringComparison.OrdinalIgnoreCase))
+            .GroupBy(entry => ResultKey(entry.Path, entry.Name), StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.OrderByDescending(entry => entry.Starred).ThenByDescending(entry => entry.LastUsed).First().ToSearchResult())
             .Pipe(SortFoldersFirst);
     }
 
@@ -65,6 +82,7 @@ public sealed class HistoryStore(AppConfig config)
                 existing.Item = result.Raw;
             }
         }
+        AppLogger.Info("history", $"cached results count={entries.Count} path=\"{HistoryPath()}\"");
         Write(entries);
     }
 
@@ -119,12 +137,24 @@ public sealed class HistoryStore(AppConfig config)
 
     private IReadOnlyList<HistoryEntry> Entries()
     {
+        lock (_gate)
+        {
+            _entries ??= LoadEntries();
+            return _entries
+                .OrderByDescending(entry => entry.Starred)
+                .ThenByDescending(entry => entry.LastUsed)
+                .Take(EntryLimit())
+                .ToList();
+        }
+    }
+
+    private List<HistoryEntry> LoadEntries()
+    {
         var path = HistoryPath();
         if (!File.Exists(path))
         {
             return [];
         }
-
         try
         {
             using var doc = JsonDocument.Parse(File.ReadAllText(path));
@@ -142,11 +172,11 @@ public sealed class HistoryStore(AppConfig config)
                 .Where(entry => !string.IsNullOrWhiteSpace(entry.Path) || !string.IsNullOrWhiteSpace(entry.Name))
                 .OrderByDescending(entry => entry.Starred)
                 .ThenByDescending(entry => entry.LastUsed)
-                .Take(Math.Max(1, config.History.MaxEntries))
                 .ToList();
         }
-        catch
+        catch (Exception ex)
         {
+            AppLogger.Error("history", ex, $"failed to load history path=\"{path}\"");
             return [];
         }
     }
@@ -167,7 +197,7 @@ public sealed class HistoryStore(AppConfig config)
         {
             return file;
         }
-        return Path.Combine(Path.GetDirectoryName(ConfigStore.ConfigPath) ?? AppContext.BaseDirectory, file);
+        return Path.Combine(ConfigStore.PortableRoot, file);
     }
 
     private static bool MatchesMode(HistoryEntry entry, string mode)
@@ -184,15 +214,61 @@ public sealed class HistoryStore(AppConfig config)
     private void Write(IEnumerable<HistoryEntry> entries)
     {
         var path = HistoryPath();
-        Directory.CreateDirectory(Path.GetDirectoryName(path) ?? AppContext.BaseDirectory);
-        var normalized = entries
-            .GroupBy(entry => $"{entry.Path}\0{entry.Name}\0{entry.MachineId}".ToLowerInvariant())
-            .Select(group => group.OrderByDescending(entry => entry.LastUsed).First())
-            .OrderByDescending(entry => entry.Starred)
-            .ThenByDescending(entry => entry.LastUsed)
-            .Take(Math.Max(1, config.History.MaxEntries))
-            .ToList();
-        File.WriteAllText(path, JsonSerializer.Serialize(new { version = 2, results = normalized }, JsonOptions));
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path) ?? AppContext.BaseDirectory);
+            using var lockStream = AcquireHistoryLock(path);
+            if (lockStream == null)
+            {
+                AppLogger.Warn("history", $"skipped cache write because another instance held the lock path=\"{path}\"");
+                return;
+            }
+
+            var merged = LoadEntries()
+                .Concat(entries)
+                .GroupBy(entry => $"{entry.Path}\0{entry.Name}\0{entry.MachineId}".ToLowerInvariant())
+                .Select(group => group.OrderByDescending(entry => entry.LastUsed).First())
+                .OrderByDescending(entry => entry.Starred)
+                .ThenByDescending(entry => entry.LastUsed)
+                .Take(EntryLimit())
+                .ToList();
+            var tempPath = path + "." + Environment.ProcessId + ".tmp";
+            File.WriteAllText(tempPath, JsonSerializer.Serialize(new { version = 2, results = merged }, JsonOptions));
+            File.Copy(tempPath, path, overwrite: true);
+            File.Delete(tempPath);
+            lock (_gate)
+            {
+                _entries = merged;
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error("history", ex, $"cache write failed path=\"{path}\"");
+        }
+    }
+
+    private int EntryLimit() => Math.Clamp(config.History.MaxEntries, 1, 100000);
+
+    private static FileStream? AcquireHistoryLock(string historyPath)
+    {
+        var lockPath = historyPath + ".lock";
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < deadline)
+        {
+            try
+            {
+                return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException)
+            {
+                Thread.Sleep(100);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                Thread.Sleep(100);
+            }
+        }
+        return null;
     }
 
     public static string ResultKey(SearchResult result) => ResultKey(result.Path, result.Name);

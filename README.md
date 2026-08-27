@@ -52,6 +52,7 @@ native-build.bat
 ```
 
 The WPF app reads the same `config.json` and existing `history.json` format while the migration is in progress.
+The native package is a self-contained single EXE at `dist\PyQsirchgui\PyQsirchgui.exe`, with configuration under `config\config.json`, shared history under `data\history.json`, logs under `logs`, and distributable artwork/documentation under `resources`.
 
 ## Qsirch CLI
 

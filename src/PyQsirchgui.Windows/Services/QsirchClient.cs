@@ -1,8 +1,9 @@
 using System.Net;
 using System.Net.Http;
+using System.Diagnostics;
+using System.IO;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using PyQsirchgui.Windows.Models;
 
@@ -17,61 +18,238 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
 
     public async Task<IReadOnlyList<SearchResult>> SearchAsync(string query, FileTypeFilter typeFilter, CancellationToken cancellationToken)
     {
+        return await SearchAsync(query, typeFilter, 500, 0, null, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<SearchResult>> SearchAsync(
+        string query,
+        FileTypeFilter typeFilter,
+        Func<IReadOnlyList<SearchResult>, Task>? batchReceived,
+        CancellationToken cancellationToken)
+    {
+        return await SearchAsync(query, typeFilter, 500, 0, null, "desc", batchReceived, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<SearchResult>> SearchAsync(
+        string query,
+        FileTypeFilter typeFilter,
+        int limit,
+        int offset,
+        Func<IReadOnlyList<SearchResult>, Task>? batchReceived,
+        CancellationToken cancellationToken)
+    {
+        return await SearchAsync(query, typeFilter, limit, offset, null, "desc", batchReceived, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<SearchResult>> SearchAsync(
+        string query,
+        FileTypeFilter typeFilter,
+        int limit,
+        int offset,
+        string? sortBy,
+        string sortDir,
+        Func<IReadOnlyList<SearchResult>, Task>? batchReceived,
+        CancellationToken cancellationToken)
+    {
         if (string.IsNullOrWhiteSpace(config.Host) || string.IsNullOrWhiteSpace(config.User) || string.IsNullOrWhiteSpace(config.Password))
         {
             throw new InvalidOperationException("Configure the NAS connection in config.json first.");
         }
 
         await LoginAsync(cancellationToken);
-        const int limit = 500;
-        var url = $"{_baseUrl}/qsirch/latest/api/search?q={Uri.EscapeDataString(query)}&limit={limit}&offset=0&advanced_mode=0";
+        var stopwatch = Stopwatch.StartNew();
+        limit = Math.Clamp(limit, 1, 500);
+        offset = Math.Max(0, offset);
+        var url = $"{_baseUrl}/qsirch/latest/api/search?q={Uri.EscapeDataString(query)}&limit={limit}&offset={offset}&advanced_mode=0";
+        if (!string.IsNullOrWhiteSpace(sortBy) && !sortBy.Equals("relevance", StringComparison.OrdinalIgnoreCase))
+        {
+            url += $"&sort_by={Uri.EscapeDataString(sortBy)}&sort_dir={Uri.EscapeDataString(sortDir)}";
+        }
         using var request = new HttpRequestMessage(typeFilter.Category.Equals("All", StringComparison.OrdinalIgnoreCase) ? HttpMethod.Get : HttpMethod.Post, url);
         if (!typeFilter.Category.Equals("All", StringComparison.OrdinalIgnoreCase))
         {
             request.Content = new StringContent(JsonSerializer.Serialize(new { tools = typeFilter.Category, limit }), Encoding.UTF8, "application/json");
         }
 
-        using var response = await _http.SendAsync(request, cancellationToken);
+        AppLogger.Info("qsirch", $"search request method={request.Method} host=\"{config.Host}\" port={config.Port} ssl={config.Ssl} verify={config.SslVerify} timeout={_http.Timeout.TotalSeconds:n0}s streaming=True query=\"{query}\" type=\"{typeFilter.Name}\" category=\"{typeFilter.Category}\" limit={limit} offset={offset} sort=\"{sortBy ?? "relevance"}:{sortDir}\"");
+        using var response = await SendWithTimeoutLoggingAsync(request, "search", stopwatch, cancellationToken, HttpCompletionOption.ResponseHeadersRead);
+        AppLogger.Info("qsirch", $"search response status={(int)response.StatusCode} elapsed={stopwatch.ElapsedMilliseconds}ms");
         response.EnsureSuccessStatusCode();
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-        var results = new List<SearchResult>();
-        if (!doc.RootElement.TryGetProperty("items", out var items) || items.ValueKind != JsonValueKind.Array)
+        List<SearchResult> results;
+        try
         {
-            return results;
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            results = await ReadSearchItemsAsync(stream, typeFilter, batchReceived, stopwatch, cancellationToken);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            AppLogger.Warn("qsirch", $"search body timed out after {stopwatch.ElapsedMilliseconds}ms timeout={_http.Timeout.TotalSeconds:n0}s host=\"{config.Host}\" port={config.Port} ssl={config.Ssl}");
+            throw new TimeoutException($"Qsirch search timed out after {_http.Timeout.TotalSeconds:n0} seconds.");
+        }
+        AppLogger.Info("qsirch", $"search parsed returned={results.Count} limit={limit} offset={offset} sort=\"{sortBy ?? "relevance"}:{sortDir}\" elapsed={stopwatch.ElapsedMilliseconds}ms");
+        return results;
+    }
+
+    private static async Task<List<SearchResult>> ReadSearchItemsAsync(
+        Stream stream,
+        FileTypeFilter typeFilter,
+        Func<IReadOnlyList<SearchResult>, Task>? batchReceived,
+        Stopwatch stopwatch,
+        CancellationToken cancellationToken)
+    {
+        var results = new List<SearchResult>();
+        var pendingBatch = new List<SearchResult>(10);
+        var buffer = new List<byte>(64 * 1024);
+        var readBuffer = new byte[16 * 1024];
+        var parseIndex = 0;
+        var itemsStarted = false;
+        var objectStart = -1;
+        var depth = 0;
+        var inString = false;
+        var escaped = false;
+        var firstItemLogged = false;
+
+        while (true)
+        {
+            var read = await stream.ReadAsync(readBuffer, cancellationToken);
+            if (read == 0)
+            {
+                break;
+            }
+            buffer.AddRange(readBuffer.Take(read));
+
+            if (!itemsStarted)
+            {
+                var start = FindItemsArrayStart(buffer, parseIndex);
+                if (start < 0)
+                {
+                    parseIndex = Math.Max(0, buffer.Count - 16);
+                    continue;
+                }
+                itemsStarted = true;
+                parseIndex = start;
+            }
+
+            while (parseIndex < buffer.Count)
+            {
+                var current = buffer[parseIndex];
+                if (inString)
+                {
+                    if (escaped)
+                    {
+                        escaped = false;
+                    }
+                    else if (current == (byte)'\\')
+                    {
+                        escaped = true;
+                    }
+                    else if (current == (byte)'"')
+                    {
+                        inString = false;
+                    }
+                    parseIndex++;
+                    continue;
+                }
+
+                if (current == (byte)'"')
+                {
+                    inString = true;
+                    parseIndex++;
+                    continue;
+                }
+                if (current == (byte)'{')
+                {
+                    if (depth == 0)
+                    {
+                        objectStart = parseIndex;
+                    }
+                    depth++;
+                }
+                else if (current == (byte)'}' && depth > 0)
+                {
+                    depth--;
+                    if (depth == 0 && objectStart >= 0)
+                    {
+                        var objectBytes = buffer.GetRange(objectStart, parseIndex - objectStart + 1).ToArray();
+                        using var doc = JsonDocument.Parse(objectBytes);
+                        var result = ResultFromJson(doc.RootElement.Clone());
+                        if (typeFilter.Extensions.Length == 0 || typeFilter.Extensions.Contains(result.Extension, StringComparer.OrdinalIgnoreCase))
+                        {
+                            results.Add(result);
+                            pendingBatch.Add(result);
+                            if (!firstItemLogged)
+                            {
+                                firstItemLogged = true;
+                                AppLogger.Info("qsirch", $"search first item elapsed={stopwatch.ElapsedMilliseconds}ms");
+                            }
+                            if (pendingBatch.Count >= 10 && batchReceived != null)
+                            {
+                                await batchReceived(pendingBatch.ToList());
+                                pendingBatch.Clear();
+                            }
+                        }
+                        objectStart = -1;
+                    }
+                }
+                else if (current == (byte)']' && depth == 0)
+                {
+                    parseIndex++;
+                    break;
+                }
+                parseIndex++;
+            }
         }
 
-        foreach (var element in items.EnumerateArray())
+        if (!itemsStarted)
         {
-            var result = ResultFromJson(element.Clone());
-            if (typeFilter.Extensions.Length > 0 && !typeFilter.Extensions.Contains(result.Extension, StringComparer.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-            results.Add(result);
+            AppLogger.Warn("qsirch", $"search response had no items array elapsed={stopwatch.ElapsedMilliseconds}ms");
+        }
+        if (pendingBatch.Count > 0 && batchReceived != null)
+        {
+            await batchReceived(pendingBatch);
         }
         return results;
     }
 
-    public async Task<QsirchPreview> PreviewAsync(SearchResult result, CancellationToken cancellationToken)
+    private static int FindItemsArrayStart(IReadOnlyList<byte> buffer, int start)
     {
-        if (string.IsNullOrWhiteSpace(config.Host) || string.IsNullOrWhiteSpace(config.User) || string.IsNullOrWhiteSpace(config.Password))
+        var pattern = "\"items\""u8;
+        for (var i = Math.Max(0, start); i <= buffer.Count - pattern.Length; i++)
         {
-            throw new InvalidOperationException("Configure the NAS connection in Settings first.");
-        }
+            var matches = true;
+            for (var j = 0; j < pattern.Length; j++)
+            {
+                if (buffer[i + j] != pattern[j])
+                {
+                    matches = false;
+                    break;
+                }
+            }
+            if (!matches)
+            {
+                continue;
+            }
 
-        await LoginAsync(cancellationToken);
-        var action = PreviewAction(result);
-        using var response = await _http.GetAsync(action, cancellationToken);
-        response.EnsureSuccessStatusCode();
-        var contentType = response.Content.Headers.ContentType?.MediaType ?? "";
-        var text = await response.Content.ReadAsStringAsync(cancellationToken);
-        if (contentType.Contains("html", StringComparison.OrdinalIgnoreCase) || text.TrimStart().StartsWith("<", StringComparison.Ordinal))
-        {
-            return new QsirchPreview { Summary = NormalizeWhitespace(StripHtml(text)) };
+            var index = i + pattern.Length;
+            while (index < buffer.Count && char.IsWhiteSpace((char)buffer[index]))
+            {
+                index++;
+            }
+            if (index >= buffer.Count || buffer[index] != (byte)':')
+            {
+                continue;
+            }
+            index++;
+            while (index < buffer.Count && char.IsWhiteSpace((char)buffer[index]))
+            {
+                index++;
+            }
+            if (index < buffer.Count && buffer[index] == (byte)'[')
+            {
+                return index + 1;
+            }
         }
-        using var doc = JsonDocument.Parse(text);
-        return PreviewFromJson(doc.RootElement, action);
+        return -1;
     }
 
     public async Task<byte[]?> ThumbnailAsync(SearchResult result, CancellationToken cancellationToken)
@@ -85,17 +263,21 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
         var action = ThumbnailAction(result);
         if (string.IsNullOrWhiteSpace(action))
         {
+            AppLogger.Info("qsirch", $"thumbnail skipped no action path=\"{result.DisplayPath}\" name=\"{result.FileName}\"");
             return null;
         }
 
-        using var response = await _http.GetAsync(action, cancellationToken);
+        using var request = new HttpRequestMessage(HttpMethod.Get, action);
+        using var response = await SendWithTimeoutLoggingAsync(request, "thumbnail", Stopwatch.StartNew(), cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
+            AppLogger.Warn("qsirch", $"thumbnail response status={(int)response.StatusCode} path=\"{result.DisplayPath}\" name=\"{result.FileName}\"");
             return null;
         }
         var contentType = response.Content.Headers.ContentType?.MediaType ?? "";
         if (!contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
         {
+            AppLogger.Warn("qsirch", $"thumbnail response non-image contentType=\"{contentType}\" path=\"{result.DisplayPath}\" name=\"{result.FileName}\"");
             return null;
         }
         return await response.Content.ReadAsByteArrayAsync(cancellationToken);
@@ -108,13 +290,17 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
             return;
         }
 
+        var stopwatch = Stopwatch.StartNew();
+        AppLogger.Info("qsirch", $"login request host=\"{config.Host}\" port={config.Port} ssl={config.Ssl} verify={config.SslVerify} userSet={!string.IsNullOrWhiteSpace(config.User)}");
         var encodedPassword = Convert.ToBase64String(Encoding.UTF8.GetBytes(config.Password));
         using var content = new FormUrlEncodedContent(new Dictionary<string, string>
         {
             ["user"] = config.User,
             ["pwd"] = encodedPassword,
         });
-        using var response = await _http.PostAsync($"{_baseUrl}/cgi-bin/authLogin.cgi", content, cancellationToken);
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl}/cgi-bin/authLogin.cgi") { Content = content };
+        using var response = await SendWithTimeoutLoggingAsync(request, "login", stopwatch, cancellationToken);
+        AppLogger.Info("qsirch", $"login response status={(int)response.StatusCode} elapsed={stopwatch.ElapsedMilliseconds}ms");
         response.EnsureSuccessStatusCode();
         var xml = XDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
         if (xml.Root?.Element("authPassed")?.Value != "1")
@@ -129,6 +315,7 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
         _http.DefaultRequestHeaders.Remove("Cookie");
         _http.DefaultRequestHeaders.Add("Cookie", $"NAS_SID={_sid}");
         _loggedIn = true;
+        AppLogger.Info("qsirch", $"login success elapsed={stopwatch.ElapsedMilliseconds}ms");
     }
 
     public static SearchResult ResultFromJson(JsonElement element)
@@ -151,6 +338,24 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
         return result;
     }
 
+    private async Task<HttpResponseMessage> SendWithTimeoutLoggingAsync(
+        HttpRequestMessage request,
+        string operation,
+        Stopwatch stopwatch,
+        CancellationToken cancellationToken,
+        HttpCompletionOption completionOption = HttpCompletionOption.ResponseContentRead)
+    {
+        try
+        {
+            return await _http.SendAsync(request, completionOption, cancellationToken);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            AppLogger.Warn("qsirch", $"{operation} timed out after {stopwatch.ElapsedMilliseconds}ms timeout={_http.Timeout.TotalSeconds:n0}s host=\"{config.Host}\" port={config.Port} ssl={config.Ssl}");
+            throw new TimeoutException($"Qsirch {operation} timed out after {_http.Timeout.TotalSeconds:n0} seconds.");
+        }
+    }
+
     private static HttpClient CreateHttpClient(AppConfig config)
     {
         var handler = new HttpClientHandler { CookieContainer = new CookieContainer() };
@@ -158,24 +363,8 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
         {
             handler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
         }
-        return new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(15) };
-    }
-
-    private string PreviewAction(SearchResult result)
-    {
-        if (result.Raw.ValueKind == JsonValueKind.Object &&
-            result.Raw.TryGetProperty("actions", out var actions) &&
-            actions.TryGetProperty("preview", out var preview) &&
-            preview.ValueKind != JsonValueKind.Null &&
-            !string.IsNullOrWhiteSpace(preview.ToString()))
-        {
-            var action = preview.ToString() ?? "";
-            return action.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? action : _baseUrl + action;
-        }
-
-        var path = Uri.EscapeDataString(result.Path);
-        var name = Uri.EscapeDataString(result.Name);
-        return $"{_baseUrl}/qsirch/latest/api/qusion-item?action=preview&path={path}&name={name}&app_id=badguy";
+        var timeoutSeconds = Math.Clamp(config.Behavior.SearchTimeoutSeconds, 15, 300);
+        return new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(timeoutSeconds) };
     }
 
     private string ThumbnailAction(SearchResult result)
@@ -191,90 +380,6 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
 
         var action = thumbnail.ToString() ?? "";
         return action.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? action : _baseUrl + action;
-    }
-
-    private QsirchPreview PreviewFromJson(JsonElement data, string actionUrl)
-    {
-        var summary = PreviewSummary(data);
-        var container = GetString(data, "container_type");
-        if (string.IsNullOrWhiteSpace(container))
-        {
-            container = GetString(data, "type");
-        }
-        return new QsirchPreview
-        {
-            Summary = summary,
-            IsOnlineViewer = container.Equals("online_viewer", StringComparison.OrdinalIgnoreCase),
-        };
-    }
-
-    private static string PreviewSummary(JsonElement data)
-    {
-        if (data.ValueKind != JsonValueKind.Object)
-        {
-            return "";
-        }
-
-        var lines = new List<string>();
-        var container = GetString(data, "container_type");
-        if (string.IsNullOrWhiteSpace(container))
-        {
-            container = GetString(data, "type");
-        }
-        if (!string.IsNullOrWhiteSpace(container))
-        {
-            lines.Add($"Preview type: {container}");
-        }
-
-        foreach (var key in new[] { "title", "subject", "from", "to", "date", "modified", "created" })
-        {
-            var value = GetString(data, key);
-            if (!string.IsNullOrWhiteSpace(value))
-            {
-                lines.Add($"{char.ToUpperInvariant(key[0]) + key[1..]}: {value}");
-            }
-        }
-
-        var body = StripHtml(GetString(data, "html"));
-        if (string.IsNullOrWhiteSpace(body))
-        {
-            body = GetString(data, "text");
-        }
-        if (string.IsNullOrWhiteSpace(body))
-        {
-            body = GetString(data, "content");
-        }
-        body = NormalizeWhitespace(body);
-        if (!string.IsNullOrWhiteSpace(body))
-        {
-            lines.Add("");
-            lines.Add(body.Length > 1800 ? body[..1800] : body);
-        }
-
-        if (data.TryGetProperty("info", out var info) && info.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var entry in info.EnumerateArray().Take(12))
-            {
-                var key = GetString(entry, "key");
-                var value = GetString(entry, "value");
-                if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(value))
-                {
-                    lines.Add($"{key}: {value}");
-                }
-            }
-        }
-
-        return string.Join(Environment.NewLine, lines).Trim();
-    }
-
-    private static string StripHtml(string value)
-    {
-        return Regex.Replace(value ?? "", "<[^>]+>", " ");
-    }
-
-    private static string NormalizeWhitespace(string value)
-    {
-        return Regex.Replace(value ?? "", "\\s+", " ").Trim();
     }
 
     private static bool IsFolder(SearchResult result, JsonElement element)
@@ -327,10 +432,4 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
     }
 
     public void Dispose() => _http.Dispose();
-}
-
-public sealed class QsirchPreview
-{
-    public string Summary { get; init; } = "";
-    public bool IsOnlineViewer { get; init; }
 }

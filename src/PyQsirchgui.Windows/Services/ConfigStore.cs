@@ -16,13 +16,37 @@ public static class ConfigStore
     {
         get
         {
+            var packageConfig = Path.Combine(AppContext.BaseDirectory, "config", "config.json");
+            if (File.Exists(packageConfig))
+            {
+                return packageConfig;
+            }
+
+            var legacyPackageConfig = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "config", "config.json"));
+            if (File.Exists(legacyPackageConfig))
+            {
+                return legacyPackageConfig;
+            }
+
             var appConfig = Path.Combine(AppContext.BaseDirectory, "config.json");
             if (File.Exists(appConfig))
             {
                 return appConfig;
             }
-            var repoConfig = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "config.json"));
+
+            var repoConfig = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "config.json"));
             return File.Exists(repoConfig) ? repoConfig : appConfig;
+        }
+    }
+
+    public static string PortableRoot
+    {
+        get
+        {
+            var configDirectory = Path.GetDirectoryName(ConfigPath) ?? AppContext.BaseDirectory;
+            return Path.GetFileName(configDirectory).Equals("config", StringComparison.OrdinalIgnoreCase)
+                ? Path.GetDirectoryName(configDirectory) ?? configDirectory
+                : configDirectory;
         }
     }
 
@@ -31,18 +55,24 @@ public static class ConfigStore
         try
         {
             var text = File.ReadAllText(ConfigPath);
-            return JsonSerializer.Deserialize<AppConfig>(text, JsonOptions) ?? new AppConfig();
+            var config = JsonSerializer.Deserialize<AppConfig>(text, JsonOptions) ?? new AppConfig();
+            config.ApplyCurrentHost();
+            return config;
         }
         catch
         {
-            return new AppConfig();
+            var config = new AppConfig();
+            config.ApplyCurrentHost();
+            return config;
         }
     }
 
     public static void Save(AppConfig config)
     {
+        config.CaptureCurrentHost();
         var path = ConfigPath;
         Directory.CreateDirectory(Path.GetDirectoryName(path) ?? AppContext.BaseDirectory);
         File.WriteAllText(path, JsonSerializer.Serialize(config, JsonOptions));
+        config.ApplyCurrentHost();
     }
 }
