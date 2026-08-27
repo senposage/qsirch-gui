@@ -49,8 +49,6 @@ See [CHANGELOG.md](CHANGELOG.md) for technical test-build notes and `PyQsirchgui
 
 ## Upstream Qsirch CLI
 
-## Qsirch CLI
-
 A Python command-line client for the **QNAP Qsirch 7 REST API**. Search emails, documents, and files indexed on your QNAP NAS directly from the terminal or integrate into automated workflows.
 
 Built from comprehensive reverse-engineering of the undocumented Qsirch 7 API.
