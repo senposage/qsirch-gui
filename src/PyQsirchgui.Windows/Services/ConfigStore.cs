@@ -91,6 +91,12 @@ public static class ConfigStore
         {
             persisted.Hosts[hostKey] = currentHost;
         }
+        persisted.Host = config.Host;
+        persisted.Port = config.Port;
+        persisted.Ssl = config.Ssl;
+        persisted.SslVerify = config.SslVerify;
+        persisted.User = config.User;
+        persisted.Password = config.Password;
         persisted.Exclude = config.Exclude;
         persisted.VisibilityRules = config.VisibilityRules;
         persisted.ClearRootMachineSettings();

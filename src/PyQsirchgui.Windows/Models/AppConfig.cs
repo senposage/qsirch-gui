@@ -4,6 +4,8 @@ namespace PyQsirchgui.Windows.Models;
 
 public sealed class AppConfig
 {
+    private ConnectionDefaults? _rootConnectionDefaults;
+
     [JsonPropertyName("host")]
     public string Host { get; set; } = "";
 
@@ -50,6 +52,7 @@ public sealed class AppConfig
 
     public void ApplyCurrentHost()
     {
+        CaptureRootConnectionDefaults();
         NormalizeRules(Exclude, global: true);
         foreach (var rule in VisibilityRules)
         {
@@ -94,6 +97,8 @@ public sealed class AppConfig
 
     public void CaptureCurrentHost()
     {
+        CaptureRootConnectionDefaults();
+        PromoteMissingSharedConnectionValues();
         NormalizeRules(Exclude, global: false);
         var globalExclude = new ExcludeConfig
         {
@@ -128,6 +133,7 @@ public sealed class AppConfig
             PinnedTabs = PinnedTabs.Select(ClonePinnedTab).ToList(),
         };
 
+        RestoreRootConnectionDefaults();
         ClearRootMachineSettings();
         Exclude = globalExclude;
         VisibilityRules = VisibilityRules.Where(x => x.IsGlobal).Select(CloneVisibilityRule).ToList();
@@ -135,14 +141,46 @@ public sealed class AppConfig
 
     public void ClearRootMachineSettings()
     {
-        // The root NAS endpoint is a shared deployment default. Other live settings belong to a host record.
-        User = "";
-        Password = "";
+        // The root NAS connection is a shared deployment default. Other live settings belong to a host record.
         PathMappings = [];
         Behavior = new BehaviorConfig();
         History = new HistoryConfig();
         AlwaysOnTop = true;
         PinnedTabs = [];
+    }
+
+    private void CaptureRootConnectionDefaults()
+    {
+        _rootConnectionDefaults ??= new ConnectionDefaults(Host, Port, Ssl, SslVerify, User, Password);
+    }
+
+    private void PromoteMissingSharedConnectionValues()
+    {
+        var defaults = _rootConnectionDefaults ?? new ConnectionDefaults(Host, Port, Ssl, SslVerify, User, Password);
+        if (string.IsNullOrWhiteSpace(defaults.Host) && !string.IsNullOrWhiteSpace(Host))
+        {
+            defaults = defaults with { Host = Host, Port = Port, Ssl = Ssl, SslVerify = SslVerify };
+        }
+        if (string.IsNullOrWhiteSpace(defaults.User) && !string.IsNullOrWhiteSpace(User))
+        {
+            defaults = defaults with { User = User };
+        }
+        if (string.IsNullOrWhiteSpace(defaults.Password) && !string.IsNullOrWhiteSpace(Password))
+        {
+            defaults = defaults with { Password = Password };
+        }
+        _rootConnectionDefaults = defaults;
+    }
+
+    private void RestoreRootConnectionDefaults()
+    {
+        var defaults = _rootConnectionDefaults ?? new ConnectionDefaults(Host, Port, Ssl, SslVerify, User, Password);
+        Host = defaults.Host;
+        Port = defaults.Port;
+        Ssl = defaults.Ssl;
+        SslVerify = defaults.SslVerify;
+        User = defaults.User;
+        Password = defaults.Password;
     }
 
     private static void NormalizeRules(ExcludeConfig exclude, bool global)
@@ -199,6 +237,8 @@ public sealed class AppConfig
         MaxEntries = history.MaxEntries,
         SourceFilter = history.SourceFilter,
     };
+
+    private sealed record ConnectionDefaults(string Host, int Port, bool Ssl, bool SslVerify, string User, string Password);
 }
 
 public sealed class HostConfig

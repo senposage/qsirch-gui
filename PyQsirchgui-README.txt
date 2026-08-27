@@ -42,7 +42,7 @@ Appearance / behavior:
 - Result icons use fast Windows shell file/folder icons by default. Qsirch thumbnails can be enabled in Settings if richer icons are worth the extra NAS calls.
 - Details columns can be shown/hidden from the header right-click menu.
 - Normal header click sorts by one column. Ctrl+click a Details header to add/toggle another sort column, such as Name asc + Date desc.
-- Portable settings are host-aware. The root NAS address and HTTPS settings provide the shared deployment default; a machine can override them in Settings, which stores its connection, behavior, history settings, mappings, pinned tabs, and always-on-top state under hosts\<computer name>. Only rules marked Global apply to every host.
+- Portable settings are host-aware. The root NAS address, HTTPS settings, username, and password provide the shared deployment default; a machine can override them in Settings, which stores its connection, behavior, history settings, mappings, pinned tabs, and always-on-top state under hosts\<computer name>. Only rules marked Global apply to every host.
 - Qsirch search requests a small first page, paints it, then keeps requesting later pages until Qsirch returns an empty page.
 - The first page size, later page size, and timeout can be changed in Settings > Behavior.
 - Stop cancels the active search and leaves already painted results in place. Opening a result also cancels the active search; preview does not.

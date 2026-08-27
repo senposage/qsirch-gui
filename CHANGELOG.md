@@ -87,7 +87,7 @@
 ### Configuration, persistence, and shared deployment behavior
 
 - Kept `config.json` portable and human-readable with indented JSON serialization.
-- The root configuration retains the shared deployment NAS endpoint: `host`, `port`, `ssl`, and `ssl_verify`.
+- The root configuration retains the shared deployment NAS connection: `host`, `port`, `ssl`, `ssl_verify`, `user`, and `password`.
 - Machine-specific configuration is stored under `hosts.<UPPERCASE_MACHINE_NAME>` and includes credentials, path mappings, behavior, history preferences, local rules, always-on-top state, and pinned tabs.
 - A machine can override the root NAS endpoint through Settings without modifying the shared deployment default.
 - Root-level pinned tabs are migrated into the active host record on the next save, preventing tabs from leaking to another workstation.
