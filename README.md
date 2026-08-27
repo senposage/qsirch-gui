@@ -1,58 +1,53 @@
-# PyQsirchgui and Qsirch CLI
+# PyQsirchgui
 
-This repo now includes two entry points:
+PyQsirchgui is a portable Windows desktop search application for QNAP Qsirch. It gives staff an Explorer-style way to search NAS files, open results with their normal Windows applications, reveal them in File Explorer, and keep frequently used searches and files close at hand.
 
-- `qsirch_gui.py` - Windows floating search app for Qsirch, with tray behavior, result history, mapped-drive opening, configurable global hotkey, taskbar toggle, and editable exclusions.
-- `src\PyQsirchgui.Windows` - native WPF Windows shell for the Explorer-like UI migration.
-- `qsirch.py` - original Python command-line client for the QNAP Qsirch 7 REST API.
+The active application is a native WPF Windows client. The original Qsirch Python CLI remains in this repository as the upstream-compatible API implementation.
 
-## Windows App
+> **Status:** v0.8b test build. This is the branch for testing the native Windows GUI before wider deployment.
 
-Run from source:
+## Highlights
 
-```bash
-pip install -r requirements.txt
-python qsirch_gui.py
-```
+- Explorer-style Details, List, Small Icons, and Large Icons result views
+- Folders first, familiar file-type filtering, column sorting, and multi-column sort support
+- Open files with their default Windows application or Show them in File Explorer
+- Search tabs, pinned searches, Favorites, and shared saved-result history
+- Optional preview pane, match highlighting, light mode, dark mode, and Follow Windows appearance
+- Tray controls, optional taskbar presence, always-on-top mode, and global hide/unhide shortcut
+- Per-workstation settings and path mappings with a shared NAS endpoint default
+- Shared cache/history for faster repeat searches, with workstation tagging and visibility rules
+- Portable self-contained Windows deployment with no separate .NET installation
 
-Build the portable Windows folder:
+## Build and Run
 
-```bat
-build.bat
-```
-
-Expected build output:
-
-```text
-dist\PyQsirchgui\PyQsirchgui.exe
-dist\PyQsirchgui\config.json
-```
-
-Deploy the whole `dist\PyQsirchgui` folder to the share. The app keeps `config.json` and shared result history beside the EXE.
-
-See `PyQsirchgui-README.txt` for the GUI-specific notes.
-
-## Native Windows UI
-
-The WPF migration lives in `src\PyQsirchgui.Windows`.
-
-The native app is intended to become the Explorer-like UI:
-
-- top search box with plain file type filter
-- Explorer view modes: Large icons, Small icons, List, Details
-- folders bucketed above files
-- left Favorites quick-launch list
-- Open uses the Windows default app
-- Show selects the file in Explorer
-
-Build it with:
+Build the native Windows application:
 
 ```bat
 native-build.bat
 ```
 
-The WPF app reads the same `config.json` and existing `history.json` format while the migration is in progress.
-The native package is a self-contained single EXE at `dist\PyQsirchgui\PyQsirchgui.exe`, with configuration under `config\config.json`, shared history under `data\history.json`, logs under `logs`, and distributable artwork/documentation under `resources`.
+The portable package is created at:
+
+```text
+dist\PyQsirchgui\PyQsirchgui.exe
+dist\PyQsirchgui\config\config.json
+dist\PyQsirchgui\data\history.json
+dist\PyQsirchgui\logs\
+dist\PyQsirchgui\resources\
+```
+
+Deploy the complete `dist\PyQsirchgui` folder to the shared location and create workstation shortcuts to `PyQsirchgui.exe`.
+
+See [CHANGELOG.md](CHANGELOG.md) for technical test-build notes and `PyQsirchgui-README.txt` for deployment and configuration details.
+
+## Repository Contents
+
+- `src\PyQsirchgui.Windows` - active native WPF desktop application
+- `native-build.bat` - builds the portable self-contained Windows package
+- `qsirch_gui.py` - earlier Python GUI, retained for reference during the migration
+- `qsirch.py` - upstream-compatible Qsirch CLI/API implementation
+
+## Upstream Qsirch CLI
 
 ## Qsirch CLI
 
