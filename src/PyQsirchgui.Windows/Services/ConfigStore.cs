@@ -72,7 +72,80 @@ public static class ConfigStore
         config.CaptureCurrentHost();
         var path = ConfigPath;
         Directory.CreateDirectory(Path.GetDirectoryName(path) ?? AppContext.BaseDirectory);
-        File.WriteAllText(path, JsonSerializer.Serialize(config, JsonOptions));
+        using var configLock = AcquireLock(path);
+        if (configLock == null)
+        {
+            AppLogger.Warn("config", $"skipped save because another instance held the lock path=\"{path}\"");
+            return;
+        }
+
+        var persisted = ReadPersisted(path);
+        if (persisted == null)
+        {
+            AppLogger.Warn("config", $"skipped save because existing config could not be read path=\"{path}\"");
+            return;
+        }
+
+        var hostKey = AppConfig.CurrentHostKey;
+        if (config.Hosts.TryGetValue(hostKey, out var currentHost))
+        {
+            persisted.Hosts[hostKey] = currentHost;
+        }
+        persisted.Exclude = config.Exclude;
+        persisted.VisibilityRules = config.VisibilityRules;
+        persisted.ClearRootMachineSettings();
+
+        var tempPath = path + "." + Environment.ProcessId + ".tmp";
+        try
+        {
+            File.WriteAllText(tempPath, JsonSerializer.Serialize(persisted, JsonOptions));
+            File.Copy(tempPath, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+        }
+
+        config.Hosts = persisted.Hosts;
+        config.Exclude = persisted.Exclude;
+        config.VisibilityRules = persisted.VisibilityRules;
         config.ApplyCurrentHost();
+    }
+
+    private static AppConfig? ReadPersisted(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return new AppConfig();
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(path), JsonOptions) ?? new AppConfig();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static FileStream? AcquireLock(string path)
+    {
+        var lockPath = path + ".lock";
+        for (var attempt = 0; attempt < 10; attempt++)
+        {
+            try
+            {
+                return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException) when (attempt < 9)
+            {
+                Thread.Sleep(25);
+            }
+        }
+        return null;
     }
 }

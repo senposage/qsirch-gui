@@ -128,8 +128,21 @@ public sealed class AppConfig
             PinnedTabs = PinnedTabs.Select(ClonePinnedTab).ToList(),
         };
 
+        ClearRootMachineSettings();
         Exclude = globalExclude;
         VisibilityRules = VisibilityRules.Where(x => x.IsGlobal).Select(CloneVisibilityRule).ToList();
+    }
+
+    public void ClearRootMachineSettings()
+    {
+        // The root NAS endpoint is a shared deployment default. Other live settings belong to a host record.
+        User = "";
+        Password = "";
+        PathMappings = [];
+        Behavior = new BehaviorConfig();
+        History = new HistoryConfig();
+        AlwaysOnTop = true;
+        PinnedTabs = [];
     }
 
     private static void NormalizeRules(ExcludeConfig exclude, bool global)

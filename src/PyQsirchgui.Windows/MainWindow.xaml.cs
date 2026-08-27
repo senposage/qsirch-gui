@@ -88,6 +88,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 SortValue = pinned.SortValue,
                 TypeIndex = pinned.TypeIndex,
                 IsPinned = true,
+                SearchOnFirstFocus = !string.IsNullOrWhiteSpace(pinned.Query),
             });
         }
         _selectedSearchTab = SearchTabs[0];
@@ -182,6 +183,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _selectedSearchTab = value;
             OnPropertyChanged();
             LoadTabState(value);
+            if (value.SearchOnFirstFocus && !string.IsNullOrWhiteSpace(value.Query))
+            {
+                value.SearchOnFirstFocus = false;
+                _ = SearchAsync();
+            }
         }
     }
 
@@ -486,49 +492,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         await Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
         LoadFavorites();
         AppLogger.Info("app", $"deferred favorites loaded count={FavoriteResults.Count}");
-        await RestorePinnedTabResultsAsync();
     }
 
     private void ClearClicked(object sender, RoutedEventArgs e)
     {
         Query = "";
         SearchText.Focus();
-    }
-
-    private async Task RestorePinnedTabResultsAsync()
-    {
-        var pinnedTabs = SearchTabs.Where(tab => tab.IsPinned && !string.IsNullOrWhiteSpace(tab.Query)).ToList();
-        foreach (var tab in pinnedTabs)
-        {
-            var restored = await Task.Run(() =>
-            {
-                var starred = _history.StarredKeys();
-                var typeFilter = TypeFilters[Math.Clamp(tab.TypeIndex, 0, TypeFilters.Count - 1)];
-                var results = _history.CachedResults(tab.Query)
-                    .Where(result => !_rules.IsHidden(result))
-                    .ToList();
-                foreach (var result in results)
-                {
-                    result.IsFavorite = starred.Contains(HistoryStore.ResultKey(result));
-                }
-
-                return SortResults(results, ParseSortKeys(tab.SortValue))
-                    .Where(result => MatchesType(result, typeFilter))
-                    .ToList();
-            });
-
-            tab.AllResults = restored.ToList();
-            tab.VisibleResults = restored;
-            tab.StatusText = "Saved results";
-            tab.CountText = ResultCountText(restored.Count);
-            AppLogger.Info("history", $"restored pinned tab query=\"{tab.Query}\" results={restored.Count}");
-
-            if (IsActiveTab(tab))
-            {
-                LoadTabState(tab);
-                _ = LoadResultIconsAsync(tab.VisibleResults, CancellationToken.None);
-            }
-        }
     }
 
     private void ClearSearchResults(bool cancelActiveSearch)
@@ -1708,14 +1677,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private IEnumerable<SearchResult> SortResults(IEnumerable<SearchResult> results, IReadOnlyList<ResultSortKey>? sortKeys = null)
+    private IEnumerable<SearchResult> SortResults(IEnumerable<SearchResult> results)
     {
-        sortKeys ??= _sortKeys;
         var indexed = results.Select((item, index) => (item, index));
         IOrderedEnumerable<(SearchResult item, int index)> ordered = _config.Behavior.FoldersFirst
             ? indexed.OrderBy(x => x.item.IsFolder ? 0 : 1)
             : indexed.OrderBy(x => 0);
-        foreach (var sort in sortKeys)
+        foreach (var sort in _sortKeys)
         {
             ordered = ApplySortKey(ordered, sort);
         }
@@ -2348,6 +2316,7 @@ public sealed class SearchTabState : INotifyPropertyChanged
     public string ViewKey { get; set; } = "details";
     public string SortValue { get; set; } = "recent:desc";
     public int TypeIndex { get; set; }
+    public bool SearchOnFirstFocus { get; set; }
     public CancellationTokenSource? SearchCts { get; set; }
     public int SearchVersion { get; set; }
     public bool IsBusy { get; set; }

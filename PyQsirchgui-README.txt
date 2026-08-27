@@ -20,6 +20,7 @@ Native package layout (run native-build.bat):
 Portable deployment:
 - Put the whole PyQsirchgui folder on the share.
 - Create workstation shortcuts to that EXE.
+- Only one PyQsirchgui instance may run on a computer at a time; a second launch shows a warning and exits.
 - Shared history defaults to data\history.json.
 - History is enabled by default and stores saved result records with hostname, local IPv4, last-used time, and use count.
 - The visible history filter defaults to This machine, so each workstation sees its own hostname's saved results first.
@@ -37,10 +38,11 @@ Appearance / behavior:
 - If Windows reports the shortcut is already owned by another app, Settings shows a warning.
 - The native app has a project icon under Assets\app.ico.
 - Search tabs keep separate query text, result lists, view mode, sort, filter, and status.
+- Pinned search tabs are stored under the current machine's host record and do not appear on other workstations.
 - Result icons use fast Windows shell file/folder icons by default. Qsirch thumbnails can be enabled in Settings if richer icons are worth the extra NAS calls.
 - Details columns can be shown/hidden from the header right-click menu.
 - Normal header click sorts by one column. Ctrl+click a Details header to add/toggle another sort column, such as Name asc + Date desc.
-- Portable settings are host-aware. The shared config keeps machine-specific settings under hosts\<computer name>, while rules marked Global apply to every host.
+- Portable settings are host-aware. The root NAS address and HTTPS settings provide the shared deployment default; a machine can override them in Settings, which stores its connection, behavior, history settings, mappings, pinned tabs, and always-on-top state under hosts\<computer name>. Only rules marked Global apply to every host.
 - Qsirch search requests a small first page, paints it, then keeps requesting later pages until Qsirch returns an empty page.
 - The first page size, later page size, and timeout can be changed in Settings > Behavior.
 - Stop cancels the active search and leaves already painted results in place. Opening a result also cancels the active search; preview does not.

@@ -6,8 +6,17 @@ namespace PyQsirchgui.Windows;
 
 public partial class App : Application
 {
+    private const string InstanceMutexName = @"Global\PyQsirchgui.SingleInstance";
+    private Mutex? _instanceMutex;
+
     protected override void OnStartup(StartupEventArgs e)
     {
+        if (!TryAcquireSingleInstance())
+        {
+            Shutdown();
+            return;
+        }
+
         var assembly = Assembly.GetExecutingAssembly().GetName();
         AppLogger.Info("app", $"startup assembly={assembly.Name} version={assembly.Version} streaming_search=True");
         DispatcherUnhandledException += (_, args) =>
@@ -31,5 +40,53 @@ public partial class App : Application
             args.SetObserved();
         };
         base.OnStartup(e);
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        try
+        {
+            _instanceMutex?.ReleaseMutex();
+        }
+        catch (ApplicationException)
+        {
+        }
+        finally
+        {
+            _instanceMutex?.Dispose();
+            _instanceMutex = null;
+        }
+
+        base.OnExit(e);
+    }
+
+    private bool TryAcquireSingleInstance()
+    {
+        try
+        {
+            var mutex = new Mutex(true, InstanceMutexName, out var createdNew);
+            if (createdNew)
+            {
+                _instanceMutex = mutex;
+                return true;
+            }
+
+            mutex.Dispose();
+            MessageBox.Show(
+                "PyQsirchgui is already running on this computer. Close the existing instance before starting another.",
+                "PyQsirchgui already running",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            MessageBox.Show(
+                "PyQsirchgui could not establish its single-instance check. Contact your administrator before running another copy.",
+                "PyQsirchgui startup",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return false;
+        }
     }
 }
