@@ -999,8 +999,8 @@
         <Border Grid.Row="1" Background="{DynamicResource AppSubtleBorderBrush}" />
         <Grid Grid.Row="2" Margin="10,10,10,9">
           <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="45*" MinWidth="220" />
-            <ColumnDefinition Width="55*" />
+            <ColumnDefinition Width="360" MinWidth="220" />
+            <ColumnDefinition Width="*" />
           </Grid.ColumnDefinitions>
           <Border x:Name="SearchBoxChrome"
                   Grid.Column="0"
