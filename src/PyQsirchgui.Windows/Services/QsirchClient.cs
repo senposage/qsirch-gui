@@ -58,7 +58,6 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
             throw new InvalidOperationException("Configure the NAS connection in config.json first.");
         }
 
-        await LoginAsync(cancellationToken);
         var stopwatch = Stopwatch.StartNew();
         limit = Math.Clamp(limit, 1, 500);
         offset = Math.Max(0, offset);
@@ -67,14 +66,19 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
         {
             url += $"&sort_by={Uri.EscapeDataString(sortBy)}&sort_dir={Uri.EscapeDataString(sortDir)}";
         }
-        using var request = new HttpRequestMessage(typeFilter.Category.Equals("All", StringComparison.OrdinalIgnoreCase) ? HttpMethod.Get : HttpMethod.Post, url);
-        if (!typeFilter.Category.Equals("All", StringComparison.OrdinalIgnoreCase))
+        var searchMethod = typeFilter.Category.Equals("All", StringComparison.OrdinalIgnoreCase) ? HttpMethod.Get : HttpMethod.Post;
+        HttpRequestMessage CreateSearchRequest()
         {
-            request.Content = new StringContent(JsonSerializer.Serialize(new { tools = typeFilter.Category, limit }), Encoding.UTF8, "application/json");
+            var request = new HttpRequestMessage(searchMethod, url);
+            if (!typeFilter.Category.Equals("All", StringComparison.OrdinalIgnoreCase))
+            {
+                request.Content = new StringContent(JsonSerializer.Serialize(new { tools = typeFilter.Category, limit }), Encoding.UTF8, "application/json");
+            }
+            return request;
         }
 
-        AppLogger.Info("qsirch", $"search request method={request.Method} host=\"{config.Host}\" port={config.Port} ssl={config.Ssl} verify={config.SslVerify} timeout={_http.Timeout.TotalSeconds:n0}s streaming=True query=\"{query}\" type=\"{typeFilter.Name}\" category=\"{typeFilter.Category}\" limit={limit} offset={offset} sort=\"{sortBy ?? "relevance"}:{sortDir}\"");
-        using var response = await SendWithTimeoutLoggingAsync(request, "search", stopwatch, cancellationToken, HttpCompletionOption.ResponseHeadersRead);
+        AppLogger.Info("qsirch", $"search request method={searchMethod} host=\"{config.Host}\" port={config.Port} ssl={config.Ssl} verify={config.SslVerify} timeout={_http.Timeout.TotalSeconds:n0}s streaming=True query=\"{query}\" type=\"{typeFilter.Name}\" category=\"{typeFilter.Category}\" limit={limit} offset={offset} sort=\"{sortBy ?? "relevance"}:{sortDir}\"");
+        using var response = await SendWithSessionRecoveryAsync(CreateSearchRequest, "search", stopwatch, cancellationToken, HttpCompletionOption.ResponseHeadersRead);
         AppLogger.Info("qsirch", $"search response status={(int)response.StatusCode} elapsed={stopwatch.ElapsedMilliseconds}ms");
         response.EnsureSuccessStatusCode();
         List<SearchResult> results;
@@ -262,7 +266,6 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
             return null;
         }
 
-        await LoginAsync(cancellationToken);
         var action = ThumbnailAction(result);
         if (string.IsNullOrWhiteSpace(action))
         {
@@ -270,8 +273,11 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
             return null;
         }
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, action);
-        using var response = await SendWithTimeoutLoggingAsync(request, "thumbnail", Stopwatch.StartNew(), cancellationToken);
+        using var response = await SendWithSessionRecoveryAsync(
+            () => new HttpRequestMessage(HttpMethod.Get, action),
+            "thumbnail",
+            Stopwatch.StartNew(),
+            cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
             AppLogger.Warn("qsirch", $"thumbnail response status={(int)response.StatusCode} path=\"{result.DisplayPath}\" name=\"{result.FileName}\"");
@@ -408,6 +414,44 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
             AppLogger.Warn("qsirch", $"{operation} timed out after {stopwatch.ElapsedMilliseconds}ms timeout={_http.Timeout.TotalSeconds:n0}s host=\"{config.Host}\" port={config.Port} ssl={config.Ssl}");
             throw new TimeoutException($"Qsirch {operation} timed out after {_http.Timeout.TotalSeconds:n0} seconds.");
         }
+    }
+
+    private async Task<HttpResponseMessage> SendWithSessionRecoveryAsync(
+        Func<HttpRequestMessage> requestFactory,
+        string operation,
+        Stopwatch stopwatch,
+        CancellationToken cancellationToken,
+        HttpCompletionOption completionOption = HttpCompletionOption.ResponseContentRead)
+    {
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            await LoginAsync(cancellationToken);
+            var sessionId = _sid;
+            using var request = requestFactory();
+            var response = await SendWithTimeoutLoggingAsync(request, operation, stopwatch, cancellationToken, completionOption);
+            if (response.StatusCode != HttpStatusCode.Unauthorized || attempt == 1)
+            {
+                return response;
+            }
+
+            AppLogger.Warn("qsirch", $"{operation} response status=401; session expired, signing in again and retrying once");
+            response.Dispose();
+            InvalidateSession(sessionId);
+        }
+
+        throw new InvalidOperationException("Unable to recover the Qsirch session.");
+    }
+
+    private void InvalidateSession(string expiredSessionId)
+    {
+        if (!_sid.Equals(expiredSessionId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _loggedIn = false;
+        _sid = "";
+        _http.DefaultRequestHeaders.Remove("Cookie");
     }
 
     private static HttpClient CreateHttpClient(AppConfig config)
