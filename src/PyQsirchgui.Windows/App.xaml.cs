@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Reflection;
+using System.Diagnostics;
 using PyQsirchgui.Windows.Services;
 
 namespace PyQsirchgui.Windows;
@@ -29,7 +30,14 @@ public partial class App : Application
             executeOnlyOnce: false);
 
         var assembly = Assembly.GetExecutingAssembly().GetName();
-        AppLogger.Info("app", $"startup assembly={assembly.Name} version={assembly.Version} streaming_search=True");
+        var process = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName ?? "unknown";
+        AppLogger.Session(
+            $"session started user=\"{Environment.UserDomainName}\\{Environment.UserName}\" machine=\"{Environment.MachineName}\" pid={Environment.ProcessId} executable=\"{process}\" assembly={assembly.Name} version={assembly.Version} streaming_search=True");
+        var cleanup = BundleExtractionCleaner.RemoveStaleBundles();
+        if (cleanup.ActiveBundleFound && (cleanup.Removed > 0 || cleanup.Retained > 0))
+        {
+            AppLogger.Info("app", $"bundle cache cleanup removed={cleanup.Removed} retained={cleanup.Retained}");
+        }
         DispatcherUnhandledException += (_, args) =>
         {
             AppLogger.Error("app", args.Exception, "dispatcher unhandled exception");
@@ -55,6 +63,9 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        AppLogger.Session(
+            $"session ended user=\"{Environment.UserDomainName}\\{Environment.UserName}\" machine=\"{Environment.MachineName}\" pid={Environment.ProcessId} exitCode={e.ApplicationExitCode}");
+
         _activationWait?.Unregister(null);
         _activationWait = null;
         _activationEvent?.Dispose();
@@ -88,6 +99,8 @@ public partial class App : Application
             }
 
             mutex.Dispose();
+            AppLogger.Session(
+                $"second launch focused existing instance user=\"{Environment.UserDomainName}\\{Environment.UserName}\" machine=\"{Environment.MachineName}\" pid={Environment.ProcessId}");
             SignalExistingInstance();
             return false;
         }

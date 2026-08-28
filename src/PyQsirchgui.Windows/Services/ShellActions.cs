@@ -14,6 +14,13 @@ public sealed class ShellActions(PathMapper mapper)
     public void Show(SearchResult result)
     {
         var path = mapper.Resolve(result);
-        Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
+        var arguments = result.IsFolder ? $"\"{path}\"" : $"/select,\"{path}\"";
+        Process.Start(new ProcessStartInfo("explorer.exe", arguments) { UseShellExecute = true });
+    }
+
+    public void ShowProperties(SearchResult result)
+    {
+        var path = mapper.Resolve(result);
+        Process.Start(new ProcessStartInfo(path) { UseShellExecute = true, Verb = "properties" });
     }
 }

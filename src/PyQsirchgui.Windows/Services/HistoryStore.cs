@@ -1,377 +1,628 @@
-using System.IO;
 using System.Text.Json;
+using System.IO;
+using Microsoft.Data.Sqlite;
 using PyQsirchgui.Windows.Models;
 
 namespace PyQsirchgui.Windows.Services;
 
-public sealed class HistoryStore(AppConfig config)
+public sealed class HistoryStore
 {
-    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    private const int QueryLimit = 500;
+    private readonly AppConfig _config;
+    private readonly string _connectionString;
     private readonly object _gate = new();
-    private List<HistoryEntry>? _entries;
+    private bool _initialized;
 
-    public IReadOnlyList<SearchResult> Favorites()
+    public HistoryStore(AppConfig config)
     {
-        return Entries()
-            .Where(entry => entry.Starred)
-            .Select(entry =>
+        _config = config;
+        var localData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var directory = string.IsNullOrWhiteSpace(localData)
+            ? Path.Combine(ConfigStore.PortableRoot, "data", "cache")
+            : Path.Combine(localData, "PyQsirchgui", "cache");
+        var path = Path.Combine(directory, $"{Environment.MachineName.ToUpperInvariant()}.history.sqlite");
+        _connectionString = new SqliteConnectionStringBuilder { DataSource = path, Mode = SqliteOpenMode.ReadWriteCreate }.ToString();
+    }
+
+    public IReadOnlyList<SearchResult> Favorites(string group = "")
+    {
+        return ReadResults(
+            "starred = 1" + (string.IsNullOrWhiteSpace(group) ? "" : " AND groups_json LIKE $group"),
+            command =>
             {
-                var result = entry.ToSearchResult();
-                result.IsFavorite = true;
-                return result;
-            })
-            .Pipe(SortFoldersFirst);
+                if (!string.IsNullOrWhiteSpace(group))
+                {
+                    command.Parameters.AddWithValue("$group", $"%\"{NormalizeGroup(group)}%" );
+                }
+            });
     }
 
-    public IReadOnlyList<SearchResult> SearchResults(string text, string mode)
+    public IReadOnlyList<string> RecentSearches(int limit = 12)
     {
-        var needle = (text ?? "").Trim();
-        if (string.IsNullOrWhiteSpace(needle) || !config.History.Enabled)
+        lock (_gate)
         {
-            return [];
+            try
+            {
+                using var connection = Open();
+                using var command = connection.CreateCommand();
+                command.CommandText = "SELECT query FROM recent_searches WHERE machine_id = $machine AND user_id = $user ORDER BY used_at DESC LIMIT $limit;";
+                BindScope(command);
+                command.Parameters.AddWithValue("$limit", Math.Clamp(limit, 1, 50));
+                using var reader = command.ExecuteReader();
+                var results = new List<string>();
+                while (reader.Read())
+                {
+                    results.Add(reader.GetString(0));
+                }
+                return results;
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("history", ex, "recent search query failed");
+                return [];
+            }
         }
-
-        return Entries()
-            .Where(entry => MatchesMode(entry, mode))
-            .Where(entry => $"{entry.Name} {entry.Extension} {entry.Path}".Contains(needle, StringComparison.OrdinalIgnoreCase))
-            .Select(entry => entry.ToSearchResult())
-            .Pipe(SortFoldersFirst);
     }
 
-    public IReadOnlyList<SearchResult> CachedResults(string text)
+    public void RecordSearch(string query)
     {
-        var needle = (text ?? "").Trim();
-        if (string.IsNullOrWhiteSpace(needle) || !config.History.Enabled)
+        var text = query.Trim();
+        if (string.IsNullOrWhiteSpace(text))
         {
-            return [];
+            return;
         }
-
-        return Entries()
-            .Where(entry => $"{entry.Name} {entry.Extension} {entry.Path}".Contains(needle, StringComparison.OrdinalIgnoreCase))
-            .GroupBy(entry => ResultKey(entry.Path, entry.Name), StringComparer.OrdinalIgnoreCase)
-            .Select(group => group.OrderByDescending(entry => entry.Starred).ThenByDescending(entry => entry.LastUsed).First().ToSearchResult())
-            .Pipe(SortFoldersFirst);
+        lock (_gate)
+        {
+            try
+            {
+                using var connection = Open();
+                using var command = connection.CreateCommand();
+                command.CommandText = """
+                    INSERT INTO recent_searches (machine_id, user_id, query, used_at)
+                    VALUES ($machine, $user, $query, $used)
+                    ON CONFLICT(machine_id, user_id, query) DO UPDATE SET used_at = excluded.used_at;
+                    """;
+                BindScope(command);
+                command.Parameters.AddWithValue("$query", text);
+                command.Parameters.AddWithValue("$used", DateTime.UtcNow.Ticks);
+                command.ExecuteNonQuery();
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("history", ex, "recent search update failed");
+            }
+        }
     }
 
-    public void AddResults(IEnumerable<SearchResult> results)
+    public IReadOnlyList<SavedSearch> SavedSearches()
     {
-        if (!config.History.Enabled)
+        lock (_gate)
+        {
+            try
+            {
+                using var connection = Open();
+                using var command = connection.CreateCommand();
+                command.CommandText = "SELECT id, name, query FROM saved_searches WHERE machine_id = $machine AND user_id = $user ORDER BY name COLLATE NOCASE;";
+                BindScope(command);
+                using var reader = command.ExecuteReader();
+                var results = new List<SavedSearch>();
+                while (reader.Read())
+                {
+                    results.Add(new SavedSearch(reader.GetInt64(0), reader.GetString(1), reader.GetString(2)));
+                }
+                return results;
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("history", ex, "saved search query failed");
+                return [];
+            }
+        }
+    }
+
+    public void SaveSearch(string name, string query)
+    {
+        lock (_gate)
+        {
+            try
+            {
+                using var connection = Open();
+                using var command = connection.CreateCommand();
+                command.CommandText = """
+                    INSERT INTO saved_searches (machine_id, user_id, name, query, saved_at)
+                    VALUES ($machine, $user, $name, $query, $saved)
+                    ON CONFLICT(machine_id, user_id, query) DO UPDATE SET name = excluded.name, saved_at = excluded.saved_at;
+                    """;
+                BindScope(command);
+                command.Parameters.AddWithValue("$name", name.Trim());
+                command.Parameters.AddWithValue("$query", query.Trim());
+                command.Parameters.AddWithValue("$saved", DateTime.UtcNow.Ticks);
+                command.ExecuteNonQuery();
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("history", ex, "saved search update failed");
+            }
+        }
+    }
+
+    public void DeleteSavedSearch(long id)
+    {
+        lock (_gate)
+        {
+            try
+            {
+                using var connection = Open();
+                using var command = connection.CreateCommand();
+                command.CommandText = "DELETE FROM saved_searches WHERE id = $id AND machine_id = $machine AND user_id = $user;";
+                BindScope(command);
+                command.Parameters.AddWithValue("$id", id);
+                command.ExecuteNonQuery();
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("history", ex, "saved search delete failed");
+            }
+        }
+    }
+
+    public IReadOnlyList<string> FavoriteGroups()
+    {
+        lock (_gate)
+        {
+            try
+            {
+                using var connection = Open();
+                using var command = connection.CreateCommand();
+                command.CommandText = "SELECT groups_json FROM history_results WHERE machine_id = $machine AND user_id = $user AND starred = 1;";
+                BindScope(command);
+                using var reader = command.ExecuteReader();
+                return ReadGroups(reader)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(group => group, StringComparer.CurrentCultureIgnoreCase)
+                    .ToList();
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("history", ex, "favorite group query failed");
+                return [];
+            }
+        }
+    }
+
+    public IReadOnlyList<string> GroupsFor(SearchResult result)
+    {
+        lock (_gate)
+        {
+            try
+            {
+                using var connection = Open();
+                using var command = connection.CreateCommand();
+                command.CommandText = "SELECT groups_json FROM history_results WHERE result_key = $key AND machine_id = $machine AND user_id = $user;";
+                command.Parameters.AddWithValue("$key", ResultKey(result));
+                BindScope(command);
+                var groups = command.ExecuteScalar() as string;
+                return ParseGroups(groups);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("history", ex, "favorite group lookup failed");
+                return [];
+            }
+        }
+    }
+
+    public void SetStarred(SearchResult result, bool starred) => SetStarred([result], starred);
+
+    public void SetStarred(IEnumerable<SearchResult> source, bool starred)
+    {
+        if (!_config.History.Enabled)
+        {
+            return;
+        }
+        var results = source.DistinctBy(ResultKey, StringComparer.OrdinalIgnoreCase).ToList();
+        lock (_gate)
+        {
+            try
+            {
+                using var connection = Open();
+                using var transaction = connection.BeginTransaction();
+                foreach (var result in results)
+                {
+                    UpsertResult(connection, transaction, result, preserveFavorite: false, starred, starred ? result.Groups : []);
+                }
+                transaction.Commit();
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("history", ex, "sqlite favorite update failed");
+            }
+        }
+    }
+
+    public void SetGroups(SearchResult result, IEnumerable<string> groups) => SetGroups([result], groups);
+
+    public void SetGroups(IEnumerable<SearchResult> source, IEnumerable<string> groups)
+    {
+        if (!_config.History.Enabled)
+        {
+            return;
+        }
+        var results = source.DistinctBy(ResultKey, StringComparer.OrdinalIgnoreCase).ToList();
+        var normalized = groups.Where(group => !string.IsNullOrWhiteSpace(group)).Select(NormalizeGroup).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        lock (_gate)
+        {
+            try
+            {
+                using var connection = Open();
+                using var transaction = connection.BeginTransaction();
+                foreach (var result in results)
+                {
+                    UpsertResult(connection, transaction, result, preserveFavorite: false, starred: true, normalized);
+                }
+                transaction.Commit();
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("history", ex, "sqlite group update failed");
+            }
+        }
+    }
+
+    public void SaveFavoriteStates(IEnumerable<SearchResult> source)
+    {
+        if (!_config.History.Enabled)
         {
             return;
         }
 
-        var entries = Entries().ToList();
-        var byKey = entries.ToDictionary(
-            entry => $"{entry.Path}\0{entry.Name}\0{entry.MachineId}".ToLowerInvariant(),
-            entry => entry,
-            StringComparer.OrdinalIgnoreCase);
-        var now = DateTime.Now.ToString("s");
-        foreach (var result in results)
+        var results = source.DistinctBy(ResultKey, StringComparer.OrdinalIgnoreCase).ToList();
+        lock (_gate)
         {
-            var key = $"{result.Path}\0{result.Name}\0{MachineId}".ToLowerInvariant();
-            if (!byKey.TryGetValue(key, out var existing))
+            try
             {
-                existing = HistoryEntry.FromResult(result, now);
-                entries.Add(existing);
-                byKey[key] = existing;
+                using var connection = Open();
+                using var transaction = connection.BeginTransaction();
+                foreach (var result in results)
+                {
+                    UpsertResult(
+                        connection,
+                        transaction,
+                        result,
+                        preserveFavorite: false,
+                        starred: result.IsFavorite,
+                        groups: result.IsFavorite ? result.Groups : []);
+                }
+                transaction.Commit();
             }
-            else
+            catch (Exception ex)
             {
-                existing.LastUsed = now;
-                existing.Uses += 1;
-                existing.Item = result.Raw;
+                AppLogger.Error("history", ex, "sqlite favorite state update failed");
             }
         }
-        AppLogger.Info("history", $"cached results count={entries.Count} path=\"{HistoryPath()}\"");
-        Write(entries);
     }
 
-    public void SetStarred(SearchResult result, bool starred)
-    {
-        if (!config.History.Enabled)
-        {
-            return;
-        }
-
-        var entries = Entries().ToList();
-        var now = DateTime.Now.ToString("s");
-        var existing = entries.FirstOrDefault(entry =>
-            entry.Path.Equals(result.Path, StringComparison.OrdinalIgnoreCase) &&
-            entry.Name.Equals(result.Name, StringComparison.OrdinalIgnoreCase) &&
-            entry.MachineId.Equals(MachineId, StringComparison.OrdinalIgnoreCase));
-        if (existing == null && starred)
-        {
-            existing = HistoryEntry.FromResult(result, now);
-            entries.Add(existing);
-        }
-        if (existing != null)
-        {
-            existing.Starred = starred;
-            existing.LastUsed = now;
-            existing.Item = result.Raw;
-        }
-        Write(entries);
-    }
-
-    public bool IsStarred(SearchResult result)
-    {
-        return StarredKeys().Contains(ResultKey(result.Path, result.Name));
-    }
+    public bool IsStarred(SearchResult result) => StarredKeys().Contains(ResultKey(result));
 
     public HashSet<string> StarredKeys()
     {
-        return Entries()
-            .Where(entry => entry.Starred)
-            .Select(entry => ResultKey(entry.Path, entry.Name))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        lock (_gate)
+        {
+            try
+            {
+                using var connection = Open();
+                using var command = connection.CreateCommand();
+                command.CommandText = "SELECT result_key FROM history_results WHERE machine_id = $machine AND user_id = $user AND starred = 1;";
+                BindScope(command);
+                using var reader = command.ExecuteReader();
+                var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                while (reader.Read())
+                {
+                    keys.Add(reader.GetString(0));
+                }
+                return keys;
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("history", ex, "sqlite favorite key query failed");
+                return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            }
+        }
     }
 
     public void ClearCurrentMachine(bool clearStarred)
     {
-        var entries = Entries()
-            .Where(entry => !(entry.MachineId.Equals(MachineId, StringComparison.OrdinalIgnoreCase) || entry.Machine.Equals(MachineName, StringComparison.OrdinalIgnoreCase)) ||
-                            (entry.Starred && !clearStarred))
-            .ToList();
-        Write(entries);
-    }
-
-    private IReadOnlyList<HistoryEntry> Entries()
-    {
         lock (_gate)
-        {
-            _entries ??= LoadEntries();
-            return _entries
-                .OrderByDescending(entry => entry.Starred)
-                .ThenByDescending(entry => entry.LastUsed)
-                .Take(EntryLimit())
-                .ToList();
-        }
-    }
-
-    private List<HistoryEntry> LoadEntries()
-    {
-        var path = HistoryPath();
-        if (!File.Exists(path))
-        {
-            return [];
-        }
-        try
-        {
-            using var doc = JsonDocument.Parse(File.ReadAllText(path));
-            if (!doc.RootElement.TryGetProperty("results", out var results) || results.ValueKind != JsonValueKind.Array)
-            {
-                return [];
-            }
-
-            var entries = new List<HistoryEntry>();
-            foreach (var entry in results.EnumerateArray())
-            {
-                entries.Add(HistoryEntry.FromJson(entry));
-            }
-            return entries
-                .Where(entry => !string.IsNullOrWhiteSpace(entry.Path) || !string.IsNullOrWhiteSpace(entry.Name))
-                .OrderByDescending(entry => entry.Starred)
-                .ThenByDescending(entry => entry.LastUsed)
-                .ToList();
-        }
-        catch (Exception ex)
-        {
-            AppLogger.Error("history", ex, $"failed to load history path=\"{path}\"");
-            return [];
-        }
-    }
-
-    public static List<SearchResult> SortFoldersFirst(IEnumerable<SearchResult> results)
-    {
-        return results.Select((item, index) => new { item, index })
-            .OrderBy(x => x.item.IsFolder ? 0 : 1)
-            .ThenBy(x => x.index)
-            .Select(x => x.item)
-            .ToList();
-    }
-
-    private string HistoryPath()
-    {
-        var file = string.IsNullOrWhiteSpace(config.History.File) ? "history.json" : config.History.File;
-        if (Path.IsPathRooted(file))
-        {
-            return file;
-        }
-        return Path.Combine(ConfigStore.PortableRoot, file);
-    }
-
-    private static bool MatchesMode(HistoryEntry entry, string mode)
-    {
-        return mode switch
-        {
-            "__all__" => true,
-            "__favorites__" => entry.Starred,
-            "" or "__this__" => entry.Machine.Equals(MachineName, StringComparison.OrdinalIgnoreCase) || entry.MachineId.Equals(MachineId, StringComparison.OrdinalIgnoreCase),
-            _ => entry.Machine.Equals(mode, StringComparison.OrdinalIgnoreCase),
-        };
-    }
-
-    private void Write(IEnumerable<HistoryEntry> entries)
-    {
-        var path = HistoryPath();
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(path) ?? AppContext.BaseDirectory);
-            using var lockStream = AcquireHistoryLock(path);
-            if (lockStream == null)
-            {
-                AppLogger.Warn("history", $"skipped cache write because another instance held the lock path=\"{path}\"");
-                return;
-            }
-
-            var merged = LoadEntries()
-                .Concat(entries)
-                .GroupBy(entry => $"{entry.Path}\0{entry.Name}\0{entry.MachineId}".ToLowerInvariant())
-                .Select(group => group.OrderByDescending(entry => entry.LastUsed).First())
-                .OrderByDescending(entry => entry.Starred)
-                .ThenByDescending(entry => entry.LastUsed)
-                .Take(EntryLimit())
-                .ToList();
-            var tempPath = path + "." + Environment.ProcessId + ".tmp";
-            File.WriteAllText(tempPath, JsonSerializer.Serialize(new { version = 2, results = merged }, JsonOptions));
-            File.Copy(tempPath, path, overwrite: true);
-            File.Delete(tempPath);
-            lock (_gate)
-            {
-                _entries = merged;
-            }
-        }
-        catch (Exception ex)
-        {
-            AppLogger.Error("history", ex, $"cache write failed path=\"{path}\"");
-        }
-    }
-
-    private int EntryLimit() => Math.Clamp(config.History.MaxEntries, 1, 100000);
-
-    private static FileStream? AcquireHistoryLock(string historyPath)
-    {
-        var lockPath = historyPath + ".lock";
-        var deadline = DateTime.UtcNow.AddSeconds(5);
-        while (DateTime.UtcNow < deadline)
         {
             try
             {
-                return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                using var connection = Open();
+                using var command = connection.CreateCommand();
+                command.CommandText = clearStarred
+                    ? "DELETE FROM history_results WHERE machine_id = $machine AND user_id = $user;"
+                    : "DELETE FROM history_results WHERE machine_id = $machine AND user_id = $user AND starred = 0;";
+                BindScope(command);
+                command.ExecuteNonQuery();
             }
-            catch (IOException)
+            catch (Exception ex)
             {
-                Thread.Sleep(100);
-            }
-            catch (UnauthorizedAccessException)
-            {
-                Thread.Sleep(100);
+                AppLogger.Error("history", ex, "sqlite history clear failed");
             }
         }
-        return null;
+    }
+
+    public void Reset()
+    {
+        lock (_gate)
+        {
+            try
+            {
+                using var connection = Open();
+                using var command = connection.CreateCommand();
+                command.CommandText = """
+                    DELETE FROM history_results WHERE machine_id = $machine AND user_id = $user;
+                    DELETE FROM recent_searches WHERE machine_id = $machine AND user_id = $user;
+                    DELETE FROM saved_searches WHERE machine_id = $machine AND user_id = $user;
+                    VACUUM;
+                    """;
+                BindScope(command);
+                command.ExecuteNonQuery();
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("history", ex, "sqlite maintenance reset failed");
+            }
+        }
     }
 
     public static string ResultKey(SearchResult result) => ResultKey(result.Path, result.Name);
 
-    private static string ResultKey(string path, string name)
+    private IReadOnlyList<SearchResult> ReadResults(string where, Action<SqliteCommand>? bind = null)
     {
-        return $"{path}\0{name}".ToLowerInvariant();
-    }
-
-    private static string MachineName => Environment.MachineName;
-    private static string MachineId => Environment.MachineName;
-    private static string LocalIp => "";
-
-    private sealed class HistoryEntry
-    {
-        public string Name { get; set; } = "";
-        public string Extension { get; set; } = "";
-        public string Path { get; set; } = "";
-        public long Size { get; set; }
-        public string LastUsed { get; set; } = "";
-        public string Machine { get; set; } = MachineName;
-        public string MachineId { get; set; } = HistoryStore.MachineId;
-        public string Ip { get; set; } = LocalIp;
-        public int Uses { get; set; } = 1;
-        public bool Starred { get; set; }
-        public JsonElement Item { get; set; }
-
-        public SearchResult ToSearchResult()
+        lock (_gate)
         {
-            SearchResult result;
             try
             {
-                result = Item.ValueKind == JsonValueKind.Object ? QsirchClient.ResultFromJson(Item.Clone()) : new SearchResult();
+                using var connection = Open();
+                using var command = connection.CreateCommand();
+                command.CommandText = $"""
+                    SELECT name, extension, path, type, size, modified, is_folder, starred, groups_json, resolved_path, raw_json
+                    FROM history_results
+                    WHERE machine_id = $machine AND user_id = $user AND {where}
+                    ORDER BY starred DESC, last_used DESC
+                    LIMIT $limit;
+                    """;
+                BindScope(command);
+                command.Parameters.AddWithValue("$limit", QueryLimit);
+                bind?.Invoke(command);
+                using var reader = command.ExecuteReader();
+                var results = new List<SearchResult>();
+                while (reader.Read())
+                {
+                    results.Add(ReadResult(reader));
+                }
+                return SortFoldersFirst(results);
             }
-            catch
+            catch (Exception ex)
             {
-                result = new SearchResult();
+                AppLogger.Error("history", ex, "sqlite result query failed");
+                return [];
             }
-            result.Name = string.IsNullOrWhiteSpace(result.Name) ? Name : result.Name;
-            result.Extension = string.IsNullOrWhiteSpace(result.Extension) ? Extension : result.Extension;
-            result.Path = string.IsNullOrWhiteSpace(result.Path) ? Path : result.Path;
-            result.Size = result.Size == 0 ? Size : result.Size;
-            result.IsFavorite = Starred;
-            return result;
-        }
-
-        public static HistoryEntry FromResult(SearchResult result, string now)
-        {
-            return new HistoryEntry
-            {
-                Name = result.Name,
-                Extension = result.Extension,
-                Path = result.Path,
-                Size = result.Size,
-                LastUsed = now,
-                Machine = MachineName,
-                MachineId = HistoryStore.MachineId,
-                Ip = LocalIp,
-                Uses = 1,
-                Starred = result.IsFavorite,
-                Item = result.Raw,
-            };
-        }
-
-        public static HistoryEntry FromJson(JsonElement entry)
-        {
-            var item = entry.TryGetProperty("item", out var stored) && stored.ValueKind == JsonValueKind.Object ? stored.Clone() : entry.Clone();
-            var result = QsirchClient.ResultFromJson(item);
-            return new HistoryEntry
-            {
-                Name = GetString(entry, "name", result.Name),
-                Extension = GetString(entry, "extension", result.Extension),
-                Path = GetString(entry, "path", result.Path),
-                Size = GetLong(entry, "size", result.Size),
-                LastUsed = GetString(entry, "lastUsed", GetString(entry, "last_used")),
-                Machine = GetString(entry, "machine"),
-                MachineId = GetString(entry, "machineId", GetString(entry, "machine_id")),
-                Ip = GetString(entry, "ip"),
-                Uses = (int)GetLong(entry, "uses", 1),
-                Starred = entry.TryGetProperty("starred", out var starred) && starred.ValueKind == JsonValueKind.True,
-                Item = item,
-            };
-        }
-
-        private static string GetString(JsonElement element, string name, string fallback = "")
-        {
-            return element.TryGetProperty(name, out var value) && value.ValueKind != JsonValueKind.Null ? value.ToString() ?? fallback : fallback;
-        }
-
-        private static long GetLong(JsonElement element, string name, long fallback = 0)
-        {
-            if (!element.TryGetProperty(name, out var value))
-            {
-                return fallback;
-            }
-            return value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var number)
-                ? number
-                : long.TryParse(value.ToString(), out var parsed) ? parsed : fallback;
         }
     }
-}
 
-internal static class EnumerableExtensions
-{
-    public static TResult Pipe<T, TResult>(this T value, Func<T, TResult> fn) => fn(value);
+    private void UpsertResult(SqliteConnection connection, SqliteTransaction transaction, SearchResult result, bool preserveFavorite, bool starred = false, IEnumerable<string>? groups = null)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = $"""
+            INSERT INTO history_results (result_key, machine_id, user_id, name, extension, path, type, size, modified, is_folder, last_used, uses, starred, groups_json, resolved_path, raw_json)
+            VALUES ($key, $machine, $user, $name, $extension, $path, $type, $size, $modified, $folder, $lastUsed, 1, $starred, $groups, $resolvedPath, $raw)
+            ON CONFLICT(result_key, machine_id, user_id) DO UPDATE SET
+              name = excluded.name,
+              extension = excluded.extension,
+              path = excluded.path,
+              type = excluded.type,
+              size = excluded.size,
+              modified = excluded.modified,
+              is_folder = excluded.is_folder,
+              resolved_path = CASE WHEN excluded.resolved_path <> '' THEN excluded.resolved_path ELSE history_results.resolved_path END,
+              last_used = excluded.last_used,
+              uses = history_results.uses + 1,
+              raw_json = excluded.raw_json,
+              starred = {(preserveFavorite ? "history_results.starred" : "excluded.starred")},
+              groups_json = {(preserveFavorite ? "history_results.groups_json" : "excluded.groups_json")};
+            """;
+        command.Parameters.AddWithValue("$key", ResultKey(result));
+        BindScope(command);
+        command.Parameters.AddWithValue("$name", result.Name);
+        command.Parameters.AddWithValue("$extension", result.Extension);
+        command.Parameters.AddWithValue("$path", result.Path);
+        // Only Favorites need a durable Windows/UNC location; ordinary history stays lean.
+        command.Parameters.AddWithValue("$resolvedPath", starred ? result.ResolvedPath ?? "" : "");
+        command.Parameters.AddWithValue("$type", result.Type);
+        command.Parameters.AddWithValue("$size", result.Size);
+        command.Parameters.AddWithValue("$modified", result.Modified);
+        command.Parameters.AddWithValue("$folder", result.IsFolder ? 1 : 0);
+        command.Parameters.AddWithValue("$lastUsed", DateTime.UtcNow.Ticks);
+        command.Parameters.AddWithValue("$starred", starred ? 1 : 0);
+        command.Parameters.AddWithValue("$groups", JsonSerializer.Serialize((groups ?? []).ToList()));
+        command.Parameters.AddWithValue("$raw", RawJson(result));
+        command.ExecuteNonQuery();
+    }
+
+    private SqliteConnection Open()
+    {
+        var path = new SqliteConnectionStringBuilder(_connectionString).DataSource;
+        Directory.CreateDirectory(Path.GetDirectoryName(path) ?? ConfigStore.PortableRoot);
+        var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+        if (_initialized)
+        {
+            return connection;
+        }
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            PRAGMA journal_mode = WAL;
+            PRAGMA synchronous = NORMAL;
+            CREATE TABLE IF NOT EXISTS history_results (
+              result_key TEXT NOT NULL,
+              machine_id TEXT NOT NULL,
+              user_id TEXT NOT NULL,
+              name TEXT NOT NULL,
+              extension TEXT NOT NULL,
+              path TEXT NOT NULL,
+              type TEXT NOT NULL,
+              size INTEGER NOT NULL,
+              modified TEXT NOT NULL,
+              is_folder INTEGER NOT NULL,
+              last_used INTEGER NOT NULL,
+              uses INTEGER NOT NULL,
+              starred INTEGER NOT NULL,
+              groups_json TEXT NOT NULL,
+              resolved_path TEXT NOT NULL DEFAULT '',
+              raw_json TEXT NOT NULL,
+              PRIMARY KEY (result_key, machine_id, user_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_history_scope_last_used ON history_results(machine_id, user_id, last_used DESC);
+            CREATE INDEX IF NOT EXISTS idx_history_scope_starred ON history_results(machine_id, user_id, starred);
+            CREATE TABLE IF NOT EXISTS recent_searches (
+              machine_id TEXT NOT NULL,
+              user_id TEXT NOT NULL,
+              query TEXT NOT NULL,
+              used_at INTEGER NOT NULL,
+              PRIMARY KEY (machine_id, user_id, query)
+            );
+            CREATE TABLE IF NOT EXISTS saved_searches (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              machine_id TEXT NOT NULL,
+              user_id TEXT NOT NULL,
+              name TEXT NOT NULL,
+              query TEXT NOT NULL,
+              saved_at INTEGER NOT NULL,
+              UNIQUE (machine_id, user_id, query)
+            );
+            """;
+        command.ExecuteNonQuery();
+        EnsureColumn(connection, "history_results", "resolved_path", "TEXT NOT NULL DEFAULT ''");
+        _initialized = true;
+        return connection;
+    }
+
+    private static SearchResult ReadResult(SqliteDataReader reader)
+    {
+        var raw = reader.GetString(10);
+        SearchResult result;
+        try
+        {
+            using var document = JsonDocument.Parse(raw);
+            result = QsirchClient.ResultFromJson(document.RootElement.Clone());
+            result.Raw = document.RootElement.Clone();
+        }
+        catch
+        {
+            result = new SearchResult();
+        }
+        // The indexed columns are portable and normalized when the result is saved.
+        // Raw Qsirch payloads are retained for optional thumbnail actions only.
+        result.Name = reader.GetString(0);
+        result.Extension = reader.GetString(1);
+        result.Path = reader.GetString(2);
+        result.ResolvedPath = reader.IsDBNull(9) ? "" : reader.GetString(9);
+        result.Type = reader.GetString(3);
+        result.Size = reader.GetInt64(4);
+        result.Modified = reader.GetString(5);
+        result.IsFolder = reader.GetInt64(6) != 0;
+        result.IsFavorite = reader.GetInt64(7) != 0;
+        result.Groups = ParseGroups(reader.GetString(8)).ToList();
+        return result;
+    }
+
+    public void UpdateResolvedPath(SearchResult result)
+    {
+        if (!_config.History.Enabled || string.IsNullOrWhiteSpace(result.ResolvedPath))
+        {
+            return;
+        }
+
+        lock (_gate)
+        {
+            try
+            {
+                using var connection = Open();
+                using var command = connection.CreateCommand();
+                command.CommandText = "UPDATE history_results SET resolved_path = $resolvedPath WHERE result_key = $key AND machine_id = $machine AND user_id = $user AND starred = 1;";
+                command.Parameters.AddWithValue("$resolvedPath", result.ResolvedPath);
+                command.Parameters.AddWithValue("$key", ResultKey(result));
+                BindScope(command);
+                command.ExecuteNonQuery();
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("history", ex, "sqlite resolved path update failed");
+            }
+        }
+    }
+
+    private static void EnsureColumn(SqliteConnection connection, string table, string column, string definition)
+    {
+        using var columns = connection.CreateCommand();
+        columns.CommandText = $"PRAGMA table_info({table});";
+        using var reader = columns.ExecuteReader();
+        while (reader.Read())
+        {
+            if (reader.GetString(1).Equals(column, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+        }
+
+        using var alter = connection.CreateCommand();
+        alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {definition};";
+        alter.ExecuteNonQuery();
+    }
+
+    private static IEnumerable<string> ReadGroups(SqliteDataReader reader)
+    {
+        while (reader.Read())
+        {
+            foreach (var group in ParseGroups(reader.GetString(0)))
+            {
+                yield return group;
+            }
+        }
+    }
+
+    private static string RawJson(SearchResult result) => result.Raw.ValueKind == JsonValueKind.Object ? result.Raw.GetRawText() : "{}";
+
+    private static IReadOnlyList<string> ParseGroups(string? value)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(value ?? "[]")?
+                .Where(group => !string.IsNullOrWhiteSpace(group))
+                .Select(NormalizeGroup)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList() ?? [];
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private void BindScope(SqliteCommand command)
+    {
+        command.Parameters.AddWithValue("$machine", Environment.MachineName);
+        command.Parameters.AddWithValue("$user", UserId);
+    }
+
+    private static List<SearchResult> SortFoldersFirst(IEnumerable<SearchResult> results) => results
+        .OrderBy(result => result.IsFolder ? 0 : 1)
+        .ThenBy(result => result.FileName, StringComparer.CurrentCultureIgnoreCase)
+        .ToList();
+
+    private static string NormalizeGroup(string group) => group.Trim().Replace('/', '\\').Trim('\\');
+    private static string UserId => $"{Environment.UserDomainName}\\{Environment.UserName}";
+    private static string ResultKey(string path, string name) => $"{path}\0{name}".ToLowerInvariant();
 }

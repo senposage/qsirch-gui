@@ -3,5 +3,91 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              StartupUri="MainWindow.xaml">
   <Application.Resources>
+    <SolidColorBrush x:Key="AppScrollBarTrackBrush" Color="#E4E9ED" />
+    <SolidColorBrush x:Key="AppScrollBarThumbBrush" Color="#64707B" />
+    <SolidColorBrush x:Key="AppScrollBarThumbHoverBrush" Color="#3E4B55" />
+    <SolidColorBrush x:Key="AppScrollBarThumbBorderBrush" Color="#53606A" />
+    <ControlTemplate x:Key="AppScrollBarThumbTemplate" TargetType="Thumb">
+      <Border x:Name="Chrome"
+              Margin="2"
+              Background="{TemplateBinding Background}"
+              BorderBrush="{TemplateBinding BorderBrush}"
+              BorderThickness="1"
+              CornerRadius="4" />
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True">
+          <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource AppScrollBarThumbHoverBrush}" />
+        </Trigger>
+        <Trigger Property="IsDragging" Value="True">
+          <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource AppAccentBrush}" />
+        </Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate>
+    <Style x:Key="AppScrollBarThumb" TargetType="Thumb">
+      <Setter Property="Background" Value="{DynamicResource AppScrollBarThumbBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppScrollBarThumbBorderBrush}" />
+      <Setter Property="Template" Value="{StaticResource AppScrollBarThumbTemplate}" />
+    </Style>
+    <Style x:Key="AppScrollBarPageButton" TargetType="RepeatButton">
+      <Setter Property="Background" Value="{DynamicResource AppScrollBarTrackBrush}" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Focusable" Value="False" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="RepeatButton">
+            <Border Background="{TemplateBinding Background}" />
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <ControlTemplate x:Key="AppVerticalScrollBarTemplate" TargetType="ScrollBar">
+      <Grid MinWidth="14" Background="{DynamicResource AppScrollBarTrackBrush}">
+        <Track x:Name="PART_Track"
+               Orientation="Vertical"
+               IsDirectionReversed="True"
+               Minimum="{TemplateBinding Minimum}"
+               Maximum="{TemplateBinding Maximum}"
+               ViewportSize="{TemplateBinding ViewportSize}"
+               Value="{Binding Value, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+          <Track.DecreaseRepeatButton>
+            <RepeatButton Command="{x:Static ScrollBar.PageUpCommand}" Style="{StaticResource AppScrollBarPageButton}" />
+          </Track.DecreaseRepeatButton>
+          <Track.Thumb>
+            <Thumb Style="{StaticResource AppScrollBarThumb}" MinHeight="26" />
+          </Track.Thumb>
+          <Track.IncreaseRepeatButton>
+            <RepeatButton Command="{x:Static ScrollBar.PageDownCommand}" Style="{StaticResource AppScrollBarPageButton}" />
+          </Track.IncreaseRepeatButton>
+        </Track>
+      </Grid>
+    </ControlTemplate>
+    <ControlTemplate x:Key="AppHorizontalScrollBarTemplate" TargetType="ScrollBar">
+      <Grid MinHeight="14" Background="{DynamicResource AppScrollBarTrackBrush}">
+        <Track x:Name="PART_Track"
+               Orientation="Horizontal"
+               Minimum="{TemplateBinding Minimum}"
+               Maximum="{TemplateBinding Maximum}"
+               ViewportSize="{TemplateBinding ViewportSize}"
+               Value="{Binding Value, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+          <Track.DecreaseRepeatButton>
+            <RepeatButton Command="{x:Static ScrollBar.PageLeftCommand}" Style="{StaticResource AppScrollBarPageButton}" />
+          </Track.DecreaseRepeatButton>
+          <Track.Thumb>
+            <Thumb Style="{StaticResource AppScrollBarThumb}" MinWidth="26" />
+          </Track.Thumb>
+          <Track.IncreaseRepeatButton>
+            <RepeatButton Command="{x:Static ScrollBar.PageRightCommand}" Style="{StaticResource AppScrollBarPageButton}" />
+          </Track.IncreaseRepeatButton>
+        </Track>
+      </Grid>
+    </ControlTemplate>
+    <Style TargetType="ScrollBar">
+      <Setter Property="Template" Value="{StaticResource AppVerticalScrollBarTemplate}" />
+      <Style.Triggers>
+        <Trigger Property="Orientation" Value="Horizontal">
+          <Setter Property="Template" Value="{StaticResource AppHorizontalScrollBarTemplate}" />
+        </Trigger>
+      </Style.Triggers>
+    </Style>
   </Application.Resources>
 </Application>

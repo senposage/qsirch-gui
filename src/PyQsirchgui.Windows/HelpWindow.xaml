@@ -1,0 +1,147 @@
+<Window x:Class="PyQsirchgui.Windows.HelpWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="PyQsirchgui Help"
+        Width="760"
+        Height="650"
+        MinWidth="620"
+        MinHeight="480"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource AppWindowBrush}"
+        Foreground="{DynamicResource AppTextBrush}">
+  <Window.Resources>
+    <SolidColorBrush x:Key="AppWindowBrush" Color="#F3F3F3" />
+    <SolidColorBrush x:Key="AppSurfaceBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="AppPanelBrush" Color="#FAFAFA" />
+    <SolidColorBrush x:Key="AppElevatedBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="AppBorderBrush" Color="#D0D0D0" />
+    <SolidColorBrush x:Key="AppSubtleBorderBrush" Color="#E5E5E5" />
+    <SolidColorBrush x:Key="AppTextBrush" Color="#1B1B1B" />
+    <SolidColorBrush x:Key="AppMutedTextBrush" Color="#666666" />
+    <SolidColorBrush x:Key="AppAccentBrush" Color="#0067C0" />
+    <SolidColorBrush x:Key="AppAccentSoftBrush" Color="#E5F1FB" />
+    <SolidColorBrush x:Key="AppSelectionBrush" Color="#CCE8FF" />
+    <SolidColorBrush x:Key="AppSelectionTextBrush" Color="#000000" />
+    <SolidColorBrush x:Key="AppDisabledBrush" Color="#E9E9E9" />
+    <SolidColorBrush x:Key="AppDisabledTextBrush" Color="#555555" />
+    <Style TargetType="TextBlock">
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style x:Key="SectionTitle" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="16" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Margin" Value="0,18,0,5" />
+    </Style>
+    <Style TargetType="Button">
+      <Setter Property="Padding" Value="12,6" />
+      <Setter Property="MinHeight" Value="32" />
+      <Setter Property="Margin" Value="4,0,0,0" />
+      <Setter Property="Background" Value="{DynamicResource AppElevatedBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Chrome"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="4">
+              <ContentPresenter Margin="{TemplateBinding Padding}"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource AppPanelBrush}" />
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource AppSelectionBrush}" />
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Foreground" Value="{DynamicResource AppDisabledTextBrush}" />
+                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource AppDisabledBrush}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </Window.Resources>
+  <DockPanel>
+    <Border DockPanel.Dock="Top"
+            Padding="20,16"
+            Background="{DynamicResource AppPanelBrush}"
+            BorderBrush="{DynamicResource AppBorderBrush}"
+            BorderThickness="0,0,0,1">
+      <StackPanel>
+        <TextBlock Text="PyQsirchgui Help" FontSize="22" FontWeight="SemiBold" />
+        <TextBlock Text="Fast, familiar search for shared Windows and NAS files."
+                   Margin="0,4,0,0"
+                   Foreground="{DynamicResource AppMutedTextBrush}" />
+      </StackPanel>
+    </Border>
+    <Border DockPanel.Dock="Bottom"
+            Padding="14,10"
+            Background="{DynamicResource AppPanelBrush}"
+            BorderBrush="{DynamicResource AppBorderBrush}"
+            BorderThickness="0,1,0,0">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <TextBlock Text="v1.0.0  Written by Robert J Crane"
+                   Foreground="{DynamicResource AppMutedTextBrush}"
+                   VerticalAlignment="Center" />
+        <Button Grid.Column="1" Content="Close" IsCancel="True" Margin="18,0,0,0" />
+        <Button Grid.Column="2"
+                Content="GitHub"
+                HorizontalAlignment="Center"
+                Click="GitHubClicked"
+                ToolTip="Open the PyQsirchgui project page" />
+        <Button Grid.Column="3"
+                Content="Donate"
+                HorizontalAlignment="Right"
+                Click="DonateClicked"
+                ToolTip="Support PyQsirchgui through PayPal" />
+      </Grid>
+    </Border>
+    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="20,2,20,24">
+      <StackPanel>
+        <TextBlock Style="{StaticResource SectionTitle}" Text="Search" />
+        <TextBlock Text="Type a filename or phrase, then press Enter or Search. By default, PyQsirchgui prioritizes file names so searches stay focused. Turn on Search contents when you need words found inside documents as well." />
+        <TextBlock Margin="0,7,0,0" Text="Turn on Exact match to find whole words in file names, such as finding &quot;pie&quot; without also finding &quot;Pierce&quot;. Use the file-type button to select one or more types, including Folders. Clear the selection to search every type again." />
+        <TextBlock Margin="0,7,0,0" Text="The clock button shows your recent searches. Save search keeps the current query in the Favorites pane, where double-clicking it runs the search again. Load more expands the current result limit when a broad search has more matches to fetch." />
+
+        <TextBlock Style="{StaticResource SectionTitle}" Text="Results and sorting" />
+        <TextBlock Text="Double-click a result to open it in its normal Windows application. Open does the same thing; Show opens File Explorer with the file selected. Right-click a result for the same actions, Favorites, and Copy full path." />
+        <TextBlock Margin="0,7,0,0" Text="Choose Details, List, Small icons, or Large icons from the view control. The Arrange menu includes Folder groups, which creates expandable folder sections in Details view. In Details view, click a column heading to sort. Hold Ctrl while clicking another heading to add a second sort." />
+        <TextBlock Margin="0,7,0,0" Text="Scope narrows the current search to All folders, This folder, or Modified recently. Select a result before choosing This folder. Right-click a result to open it, show it, view Properties, copy its path, or open a new scoped search tab for its folder." />
+
+        <TextBlock Style="{StaticResource SectionTitle}" Text="Favorites and groups" />
+        <TextBlock Text="Use the star on a result or Add to Favorites to keep a file handy. Select several results with Ctrl or Shift, then add all of them at once. Favorites and groups are private to the current Windows user on this computer." />
+        <TextBlock Margin="0,7,0,0" Text="Groups work like folders in a browser's Favorites list. Add a favorite to a group from the result menu, then expand the group in the Favorites pane. Double-click a favorite to open it. Right-click a group to remove it; its saved files are kept under Unfiled favorites instead of being deleted." />
+
+        <TextBlock Style="{StaticResource SectionTitle}" Text="Preview" />
+        <TextBlock Text="Preview uses the Windows preview handler installed on the computer. PDFs, Word, Excel, and similar files can preview when Windows has a compatible handler. The file is opened from its mapped Windows path; Qsirch is not used to download preview content. Video previews are intentionally unavailable." />
+
+        <TextBlock Style="{StaticResource SectionTitle}" Text="Settings" />
+        <TextBlock Text="Connection contains the NAS address, port, HTTPS, certificate verification, and sign-in details. Use HTTPS only when the NAS is actually configured for it. Certificate verification should normally stay on; turn it off only for a trusted NAS using a self-signed certificate." />
+        <TextBlock Margin="0,7,0,0" Text="Behavior controls taskbar visibility, standard Windows framing, always-on-top, the theme, default view and sort, highlighting matching text, preview availability, and whether Clear also clears visible results. Matching parent folders can appear above their matching files, or collapse those files into one folder result. The global shortcut can show or hide the window without reopening the app." />
+        <TextBlock Margin="0,7,0,0" Text="Path Mapping tells Open, Show, and Preview which drive or UNC location matches a Qsirch path. Map as deeply as needed: a mapping for a shared folder also covers every folder beneath it." />
+        <TextBlock Margin="0,7,0,0" Text="Rules hide results by path pattern and optionally by Windows user or computer. They are visibility-only rules: they never grant access to files. Use a wildcard such as @recycle\* to hide the contents of a folder. Mark a rule Global when it should apply to every workstation." />
+        <TextBlock Margin="0,7,0,0" Text="History manages saved data. Favorites, groups, saved searches, and recent searches are stored in a small local database for the current Windows user. Clear History leaves Favorites alone unless you select the starred-results option. Reset local saved-data database removes all of that user's saved items on this computer." />
+
+        <TextBlock Style="{StaticResource SectionTitle}" Text="Keyboard" />
+        <TextBlock Text="Ctrl+L places the cursor in Search. Ctrl+N creates a tab, Ctrl+W closes the current tab, F5 runs the current search, and Escape stops it. Enter opens a selected result; Shift+Enter shows it in File Explorer." />
+
+        <TextBlock Style="{StaticResource SectionTitle}" Text="If something does not work" />
+        <TextBlock Text="Check the NAS host, port, HTTPS, and sign-in details in Settings. For a self-signed NAS certificate, turn off certificate verification only when that is appropriate for your organization. If Open, Show, or Preview cannot find a file, review the Path Mapping settings and confirm the mapped drive is available in Windows." />
+      </StackPanel>
+    </ScrollViewer>
+  </DockPanel>
+</Window>

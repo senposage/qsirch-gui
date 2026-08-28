@@ -1,0 +1,142 @@
+<Window x:Class="PyQsirchgui.Windows.GroupPickerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Favorite groups"
+        Width="380"
+        Height="350"
+        MinWidth="340"
+        MinHeight="290"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource AppWindowBrush}"
+        Foreground="{DynamicResource AppTextBrush}">
+  <Window.Resources>
+    <SolidColorBrush x:Key="AppWindowBrush" Color="#F3F3F3" />
+    <SolidColorBrush x:Key="AppSurfaceBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="AppPanelBrush" Color="#FAFAFA" />
+    <SolidColorBrush x:Key="AppElevatedBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="AppBorderBrush" Color="#D0D0D0" />
+    <SolidColorBrush x:Key="AppSubtleBorderBrush" Color="#E5E5E5" />
+    <SolidColorBrush x:Key="AppTextBrush" Color="#1B1B1B" />
+    <SolidColorBrush x:Key="AppMutedTextBrush" Color="#666666" />
+    <SolidColorBrush x:Key="AppAccentBrush" Color="#0067C0" />
+    <SolidColorBrush x:Key="AppAccentSoftBrush" Color="#E5F1FB" />
+    <SolidColorBrush x:Key="AppSelectionBrush" Color="#CCE8FF" />
+    <SolidColorBrush x:Key="AppSelectionTextBrush" Color="#000000" />
+    <SolidColorBrush x:Key="AppDisabledBrush" Color="#E9E9E9" />
+    <SolidColorBrush x:Key="AppDisabledTextBrush" Color="#555555" />
+    <Style TargetType="Button">
+      <Setter Property="Background" Value="{DynamicResource AppElevatedBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Chrome"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="4">
+              <ContentPresenter Margin="{TemplateBinding Padding}"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource AppPanelBrush}" />
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource AppSelectionBrush}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style TargetType="TextBox">
+      <Setter Property="MinHeight" Value="32" />
+      <Setter Property="Padding" Value="8,5" />
+      <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+      <Setter Property="CaretBrush" Value="{DynamicResource AppTextBrush}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="TextBox">
+            <Border Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="3"
+                    Padding="{TemplateBinding Padding}">
+              <ScrollViewer x:Name="PART_ContentHost" />
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style TargetType="ListBox">
+      <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+    </Style>
+    <Style TargetType="ListBoxItem">
+      <Setter Property="Padding" Value="8,5" />
+      <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ListBoxItem">
+            <Border x:Name="Chrome" Background="Transparent" Padding="{TemplateBinding Padding}">
+              <ContentPresenter />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource AppAccentSoftBrush}" />
+              </Trigger>
+              <Trigger Property="IsSelected" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource AppSelectionBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource AppSelectionTextBrush}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </Window.Resources>
+  <Grid Margin="14">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+    <TextBlock Text="Choose a favorites folder" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,8" />
+    <TreeView x:Name="GroupTree"
+             Grid.Row="1"
+             ItemsSource="{Binding Groups}"
+             Background="{DynamicResource AppSurfaceBrush}"
+             BorderBrush="{DynamicResource AppBorderBrush}"
+             BorderThickness="1"
+             SelectedItemChanged="GroupTreeSelected">
+      <TreeView.ItemTemplate>
+        <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+          <StackPanel Orientation="Horizontal" Margin="2,3">
+            <TextBlock Text="&#xE8B7;"
+                       FontFamily="Segoe MDL2 Assets"
+                       FontSize="16"
+                       Foreground="{DynamicResource AppMutedTextBrush}"
+                       Margin="0,0,8,0" />
+            <TextBlock Text="{Binding Name}" FontSize="14" />
+          </StackPanel>
+        </HierarchicalDataTemplate>
+      </TreeView.ItemTemplate>
+    </TreeView>
+    <DockPanel Grid.Row="2" Margin="0,10,0,10">
+      <TextBlock Text="New folder" VerticalAlignment="Center" Margin="0,0,8,0" />
+      <TextBox x:Name="NewGroupText" ToolTip="Creates a folder inside the selected folder" />
+    </DockPanel>
+    <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right">
+      <Button Content="Cancel" IsCancel="True" Padding="12,6" Margin="0,0,8,0" />
+      <Button Content="Save" IsDefault="True" Click="SaveClicked" Padding="12,6" />
+    </StackPanel>
+  </Grid>
+</Window>

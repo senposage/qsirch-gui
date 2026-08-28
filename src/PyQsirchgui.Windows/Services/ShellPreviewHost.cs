@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Threading;
 
 namespace PyQsirchgui.Windows.Services;
 
@@ -13,6 +14,7 @@ public sealed class ShellPreviewHost : HwndHost
     private const string PreviewHandlerInterfaceId = "8895b1c6-b41f-4c1c-a562-0d564250836f";
     private const uint StorageRead = 0;
     private const uint StorageShareDenyNone = 0x40;
+    private const uint ClsctxInprocServer = 0x1;
     private const uint ClsctxLocalServer = 0x4;
     private const int WsChild = 0x40000000;
     private const int WsVisible = 0x10000000;
@@ -27,6 +29,10 @@ public sealed class ShellPreviewHost : HwndHost
     private PreviewHandlerFrame? _site;
     private IntPtr _childHandle;
     private bool _previewStarted;
+    private DispatcherTimer? _resizeTimer;
+    private NativeRect _pendingRect;
+    private NativeRect _lastRect;
+    private bool _hasPendingRect;
 
     public event EventHandler<PreviewFailureEventArgs>? PreviewFailed;
 
@@ -127,6 +133,7 @@ public sealed class ShellPreviewHost : HwndHost
 
     protected override void DestroyWindowCore(HandleRef hwnd)
     {
+        StopResizeTimer();
         ReleaseHandler();
         if (hwnd.Handle != IntPtr.Zero)
         {
@@ -153,11 +160,21 @@ public sealed class ShellPreviewHost : HwndHost
                 _handler.SetRect(ref rect);
                 _handler.DoPreview();
                 _previewStarted = true;
+                _lastRect = rect;
                 AppLogger.Info("preview", $"native handler started path=\"{_path}\"");
             }
-            else
+            else if (!SameSize(rect, _lastRect))
             {
-                _handler.SetRect(ref rect);
+                _pendingRect = rect;
+                _hasPendingRect = true;
+                _resizeTimer ??= new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
+                {
+                    Interval = TimeSpan.FromMilliseconds(120),
+                };
+                _resizeTimer.Tick -= ResizeTimerTick;
+                _resizeTimer.Tick += ResizeTimerTick;
+                _resizeTimer.Stop();
+                _resizeTimer.Start();
             }
         }
         catch (Exception ex)
@@ -166,35 +183,72 @@ public sealed class ShellPreviewHost : HwndHost
         }
     }
 
-    private void FailPreview(Exception ex, string operation)
+    private void ResizeTimerTick(object? sender, EventArgs e)
     {
-        AppLogger.Error("preview", ex, $"native preview {operation} failed path=\"{_path}\" handler=\"{_handlerClassId}\"");
-        ReleaseHandler();
-        Dispatcher.BeginInvoke(() => PreviewFailed?.Invoke(this, new PreviewFailureEventArgs("Windows could not load the registered preview handler for this file.")));
-    }
-
-    private void ReleaseHandler()
-    {
-        if (_handler == null)
+        _resizeTimer?.Stop();
+        if (_handler == null || !_hasPendingRect)
         {
             return;
         }
 
         try
         {
-            if (_handler is IObjectWithSite objectWithSite)
+            var rect = _pendingRect;
+            _hasPendingRect = false;
+            if (!SameSize(rect, _lastRect))
+            {
+                _handler.SetRect(ref rect);
+                _lastRect = rect;
+            }
+        }
+        catch (Exception ex)
+        {
+            FailPreview(ex, "resize");
+        }
+    }
+
+    private void StopResizeTimer()
+    {
+        if (_resizeTimer != null)
+        {
+            _resizeTimer.Stop();
+            _resizeTimer.Tick -= ResizeTimerTick;
+            _resizeTimer = null;
+        }
+        _hasPendingRect = false;
+    }
+
+    private static bool SameSize(NativeRect left, NativeRect right) => left.Right == right.Right && left.Bottom == right.Bottom;
+
+    private void FailPreview(Exception ex, string operation)
+    {
+        AppLogger.Error("preview", ex, $"native preview {operation} failed path=\"{_path}\" handler=\"{_handlerClassId}\"");
+        StopResizeTimer();
+        ReleaseHandler();
+        Dispatcher.BeginInvoke(() => PreviewFailed?.Invoke(this, new PreviewFailureEventArgs("Windows could not load the registered preview handler for this file.")));
+    }
+
+    private void ReleaseHandler()
+    {
+        var handler = _handler;
+        _handler = null;
+        try
+        {
+            if (handler is IObjectWithSite objectWithSite)
             {
                 objectWithSite.SetSite(null);
             }
-            _handler.Unload();
+            handler?.Unload();
         }
         catch
         {
         }
         finally
         {
-            Marshal.FinalReleaseComObject(_handler);
-            _handler = null;
+            if (handler != null)
+            {
+                Marshal.FinalReleaseComObject(handler);
+            }
             _site = null;
             if (_stream != null)
             {
@@ -218,8 +272,17 @@ public sealed class ShellPreviewHost : HwndHost
     private static IPreviewHandler CreatePreviewHandler(Guid handlerClassId)
     {
         var interfaceId = typeof(IPreviewHandler).GUID;
-        CoCreateInstance(ref handlerClassId, IntPtr.Zero, ClsctxLocalServer, ref interfaceId, out var handler);
-        return (IPreviewHandler)handler;
+        try
+        {
+            CoCreateInstance(ref handlerClassId, IntPtr.Zero, ClsctxLocalServer, ref interfaceId, out var handler);
+            return (IPreviewHandler)handler;
+        }
+        catch (COMException ex)
+        {
+            AppLogger.Warn("preview", $"native local-server activation failed handler=\"{handlerClassId}\" hresult=0x{ex.HResult:X8}; trying registered in-process server");
+            CoCreateInstance(ref handlerClassId, IntPtr.Zero, ClsctxInprocServer, ref interfaceId, out var handler);
+            return (IPreviewHandler)handler;
+        }
     }
 
     private static IShellItem CreateShellItem(string path)

@@ -130,7 +130,9 @@ public static class ConfigStore
 
         try
         {
-            return JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(path), JsonOptions) ?? new AppConfig();
+            var config = JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(path), JsonOptions) ?? new AppConfig();
+            config.MigrateLegacySettings();
+            return config;
         }
         catch
         {

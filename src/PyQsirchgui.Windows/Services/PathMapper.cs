@@ -22,11 +22,6 @@ public sealed class PathMapper(AppConfig config)
         {
             qpath = qpath.TrimEnd('\\') + "\\" + fileName;
         }
-        if (qpath.StartsWith(@"\\", StringComparison.OrdinalIgnoreCase))
-        {
-            return qpath;
-        }
-
         foreach (var mapping in config.PathMappings)
         {
             var target = Normalize(mapping.MappedRoot).TrimEnd('\\');
@@ -48,7 +43,109 @@ public sealed class PathMapper(AppConfig config)
             return netUsePath;
         }
 
+        var existingMappedPath = ResolveExistingMappedPath(qpath);
+        if (!string.IsNullOrWhiteSpace(existingMappedPath))
+        {
+            return existingMappedPath;
+        }
+
+        var savedPath = Normalize(result.ResolvedPath);
+        if (!string.IsNullOrWhiteSpace(savedPath))
+        {
+            var savedMappedPath = savedPath.StartsWith(@"\\", StringComparison.OrdinalIgnoreCase)
+                ? ResolveFromMappedDrives(savedPath)
+                : null;
+            return savedMappedPath ?? savedPath;
+        }
+
+        if (qpath.StartsWith(@"\\", StringComparison.OrdinalIgnoreCase) || Path.IsPathFullyQualified(qpath))
+        {
+            return qpath;
+        }
+
         throw new InvalidOperationException("No path mapping matched this result. Add a mapping in Settings, or map the matching NAS share in Windows.");
+    }
+
+    public string? TryResolve(SearchResult result)
+    {
+        try
+        {
+            return Resolve(result);
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    public string? TryResolvePreferredPath(SearchResult result)
+    {
+        return TryResolve(result);
+    }
+
+    public string? TryResolveUnc(SearchResult result)
+    {
+        var savedPath = Normalize(result.ResolvedPath);
+        if (savedPath.StartsWith(@"\\", StringComparison.OrdinalIgnoreCase))
+        {
+            return savedPath;
+        }
+
+        var qpath = Normalize(result.Path);
+        var fileName = result.FileName.Trim();
+        if (!string.IsNullOrWhiteSpace(fileName) && !qpath.EndsWith(fileName, StringComparison.OrdinalIgnoreCase))
+        {
+            qpath = qpath.TrimEnd('\\') + "\\" + fileName;
+        }
+        if (qpath.StartsWith(@"\\", StringComparison.OrdinalIgnoreCase))
+        {
+            return qpath;
+        }
+
+        foreach (var mapping in config.PathMappings)
+        {
+            var source = Normalize(mapping.ShareRoot).TrimEnd('\\');
+            if (source.StartsWith(@"\\", StringComparison.OrdinalIgnoreCase) &&
+                TryResolveMappedRoot(qpath, source, source, out var resolved))
+            {
+                return resolved;
+            }
+        }
+
+        return ResolveUncFromMappedDrives(qpath);
+    }
+
+    private static string? ResolveExistingMappedPath(string qpath)
+    {
+        var relative = qpath.TrimStart('\\');
+        if (string.IsNullOrWhiteSpace(relative) || Path.IsPathRooted(relative))
+        {
+            return null;
+        }
+
+        var separator = relative.IndexOf('\\');
+        var withoutLeadingShare = separator >= 0 ? relative[(separator + 1)..] : "";
+        foreach (var drive in DriveInfo.GetDrives())
+        {
+            if (drive.DriveType != DriveType.Network || !drive.IsReady)
+            {
+                continue;
+            }
+
+            foreach (var candidateRelativePath in new[] { relative, withoutLeadingShare }
+                         .Where(value => !string.IsNullOrWhiteSpace(value))
+                         .Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                var candidate = CombineRoot(drive.RootDirectory.FullName, candidateRelativePath);
+                if (File.Exists(candidate) || Directory.Exists(candidate))
+                {
+                    AppLogger.Info("path", $"resolved saved result from mapped drive path=\"{candidate}\"");
+                    return candidate;
+                }
+            }
+        }
+
+        return null;
     }
 
     private static string? ResolveFromMappedDrives(string qpath)
@@ -78,6 +175,38 @@ public sealed class PathMapper(AppConfig config)
                 if (relative.StartsWith(prefix + "\\", StringComparison.OrdinalIgnoreCase))
                 {
                     return CombineRoot(drive.LocalRoot, relative[(prefix.Length + 1)..]);
+                }
+            }
+        }
+        return null;
+    }
+
+    private static string? ResolveUncFromMappedDrives(string qpath)
+    {
+        var relative = qpath.TrimStart('\\');
+        foreach (var drive in NetUseDrives())
+        {
+            var remote = Normalize(drive.Remote).TrimEnd('\\');
+            if (qpath.StartsWith(remote, StringComparison.OrdinalIgnoreCase))
+            {
+                return remote + qpath[remote.Length..];
+            }
+
+            var shareName = remote.Trim('\\').Split('\\', StringSplitOptions.RemoveEmptyEntries).LastOrDefault();
+            if (string.IsNullOrWhiteSpace(shareName))
+            {
+                continue;
+            }
+
+            foreach (var prefix in CandidateSharePrefixes(shareName))
+            {
+                if (relative.Equals(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    return remote;
+                }
+                if (relative.StartsWith(prefix + "\\", StringComparison.OrdinalIgnoreCase))
+                {
+                    return CombineRoot(remote, relative[(prefix.Length + 1)..]);
                 }
             }
         }

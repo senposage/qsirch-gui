@@ -111,6 +111,48 @@
       <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
       <Setter Property="CaretBrush" Value="{DynamicResource AppTextBrush}" />
     </Style>
+    <Style TargetType="CheckBox">
+      <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="CheckBox">
+            <StackPanel Orientation="Horizontal">
+              <Border x:Name="Box"
+                      Width="16"
+                      Height="16"
+                      Margin="0,0,6,0"
+                      Background="{DynamicResource AppSurfaceBrush}"
+                      BorderBrush="{DynamicResource AppBorderBrush}"
+                      BorderThickness="1"
+                      CornerRadius="2">
+                <TextBlock x:Name="Mark"
+                           Text="&#xE73E;"
+                           FontFamily="Segoe MDL2 Assets"
+                           FontSize="11"
+                           Foreground="White"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"
+                           Visibility="Collapsed" />
+              </Border>
+              <ContentPresenter VerticalAlignment="Center" />
+            </StackPanel>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+              </Trigger>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="Box" Property="Background" Value="{DynamicResource AppAccentBrush}" />
+                <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+                <Setter TargetName="Mark" Property="Visibility" Value="Visible" />
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.6" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
     <Style TargetType="ComboBoxItem">
       <Setter Property="MinHeight" Value="30" />
       <Setter Property="Padding" Value="8,5" />
@@ -418,17 +460,20 @@
             <StackPanel Grid.Column="0" Margin="0,0,18,0">
               <CheckBox x:Name="TaskbarBox" Content="Show in taskbar" Margin="0,4" />
               <CheckBox x:Name="MinimizeToTrayBox" Content="Minimize to tray" Margin="0,4" />
+              <CheckBox x:Name="ExitToTrayBox" Content="Exit to tray when closing" Margin="0,4" />
               <CheckBox x:Name="ClearResultsWithQueryBox" Content="Clear results when search text is cleared" Margin="0,4" />
               <CheckBox x:Name="AlwaysOnTopBox" Content="Always on top" Margin="0,4" />
               <CheckBox x:Name="FoldersFirstBox" Content="Show folders before files" Margin="0,4" />
+              <CheckBox x:Name="MatchingFoldersBox" Content="Show matching parent folders" Margin="0,4" />
+              <CheckBox x:Name="CollapseMatchingFoldersBox" Content="Collapse matching folders to one result" Margin="0,4" />
               <CheckBox x:Name="SearchContentsBox" Content="Search file contents" Margin="0,4" />
             </StackPanel>
             <StackPanel Grid.Column="1">
               <CheckBox x:Name="HighlightMatchesBox" Content="Highlight matching text in results" Margin="0,4" />
+              <CheckBox x:Name="ShowInternalPathsBox" Content="Show Qsirch internal paths (advanced)" Margin="0,4" />
               <CheckBox x:Name="QsirchThumbnailsBox" Content="Use Qsirch thumbnails for result icons" Margin="0,4" />
               <CheckBox x:Name="PreviewPaneBox" Content="Show preview pane" Margin="0,4" />
               <CheckBox x:Name="AllowDownloadBox" Content="Show Download button" Margin="0,4" />
-              <CheckBox x:Name="RefreshCacheBox" Content="Refresh local cache in background on startup" Margin="0,4" />
             </StackPanel>
             <Grid Grid.Row="1" Grid.ColumnSpan="2" Margin="0,16,0,0">
               <Grid.ColumnDefinitions>
@@ -460,6 +505,7 @@
               <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,0,18,14">
                 <TextBlock Text="Default sort" Margin="0,0,0,4" />
                 <ComboBox x:Name="ResultSortBox" Width="180" HorizontalAlignment="Left">
+                  <ComboBoxItem Content="Folder groups" Tag="folder" />
                   <ComboBoxItem Content="Recentness" Tag="recent" />
                   <ComboBoxItem Content="Date modified" Tag="modified" />
                   <ComboBoxItem Content="Name" Tag="name" />
@@ -478,10 +524,11 @@
                 <TextBox x:Name="SearchTimeoutBox" Width="80" HorizontalAlignment="Left" />
               </StackPanel>
               <StackPanel Grid.Row="2" Grid.Column="1">
-                <TextBlock Text="Result page sizes" Margin="0,0,0,4" />
+                <TextBlock Text="Result paging" Margin="0,0,0,4" />
                 <StackPanel Orientation="Horizontal">
                   <TextBox x:Name="FirstPageSizeBox" Width="80" ToolTip="First result page size" />
                   <TextBox x:Name="NextPageSizeBox" Width="80" Margin="8,0,0,0" ToolTip="Next result page size" />
+                  <TextBox x:Name="ResultLimitBox" Width="80" Margin="8,0,0,0" ToolTip="Initial result limit" />
                 </StackPanel>
               </StackPanel>
             </Grid>
@@ -596,19 +643,11 @@
 
       <TabItem Header="History">
         <StackPanel MaxWidth="480" HorizontalAlignment="Left">
-          <CheckBox x:Name="HistoryEnabledBox" Content="Keep shared result history" Margin="0,4" />
-          <TextBlock Text="History file" Margin="0,10,0,3" />
-          <TextBox x:Name="HistoryFileBox" />
-          <TextBlock Text="Maximum entries" Margin="0,10,0,3" />
-          <TextBox x:Name="HistoryMaxBox" Width="100" HorizontalAlignment="Left" />
-          <TextBlock Text="Default saved-results view" Margin="0,10,0,3" />
-          <ComboBox x:Name="HistorySourceBox" Width="180" HorizontalAlignment="Left">
-            <ComboBoxItem Content="This machine" Tag="__this__" />
-            <ComboBoxItem Content="All history" Tag="__all__" />
-            <ComboBoxItem Content="Favorites" Tag="__favorites__" />
-          </ComboBox>
-          <CheckBox x:Name="ClearHistoryBox" Content="Clear this machine's history when saving" Margin="0,14,0,4" />
+          <CheckBox x:Name="HistoryEnabledBox" Content="Keep saved Favorites and folders" Margin="0,4" />
+          <TextBlock Text="Saved Favorites are kept in a local SQLite database for the current Windows user." TextWrapping="Wrap" Margin="0,10,0,6" Foreground="{DynamicResource AppMutedTextBrush}" />
+          <CheckBox x:Name="ClearHistoryBox" Content="Clear this user's saved results when saving" Margin="0,8,0,4" />
           <CheckBox x:Name="ClearStarredBox" Content="Also clear starred results" Margin="0,4" />
+          <Button Content="Reset local saved-data database" HorizontalAlignment="Left" Margin="0,14,0,0" Click="ResetDatabaseClicked" ToolTip="Clears this user's Favorites, folders, and saved searches" />
         </StackPanel>
       </TabItem>
     </TabControl>

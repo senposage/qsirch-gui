@@ -37,7 +37,7 @@ public sealed class ResultRules
             }
         }
 
-        foreach (var rule in _config.Exclude.Folders.Where(x => !string.IsNullOrWhiteSpace(x)))
+        foreach (var rule in _config.Exclude.FolderRules.Select(x => x.Pattern).Where(x => !string.IsNullOrWhiteSpace(x)))
         {
             var normalized = Normalize(rule);
             if (HasWildcard(normalized))
@@ -55,7 +55,7 @@ public sealed class ResultRules
             }
         }
 
-        foreach (var rule in _config.Exclude.Files.Where(x => !string.IsNullOrWhiteSpace(x)))
+        foreach (var rule in _config.Exclude.FileRules.Select(x => x.Pattern).Where(x => !string.IsNullOrWhiteSpace(x)))
         {
             if (HasWildcard(rule))
             {

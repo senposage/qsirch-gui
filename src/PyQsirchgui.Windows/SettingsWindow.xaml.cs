@@ -82,6 +82,7 @@ public partial class SettingsWindow : Window
     public ObservableCollection<VisibilityRule> VisibilityRules { get; }
     public bool ClearHistoryRequested { get; private set; }
     public bool ClearStarredRequested { get; private set; }
+    public bool ResetDatabaseRequested { get; private set; }
 
     private void LoadValues()
     {
@@ -93,15 +94,18 @@ public partial class SettingsWindow : Window
         SslVerifyBox.IsChecked = _config.SslVerify;
         TaskbarBox.IsChecked = _config.Behavior.ShowInTaskbar;
         MinimizeToTrayBox.IsChecked = _config.Behavior.MinimizeToTray;
+        ExitToTrayBox.IsChecked = _config.Behavior.ExitToTray;
         ClearResultsWithQueryBox.IsChecked = _config.Behavior.ClearResultsWithQuery;
         AlwaysOnTopBox.IsChecked = _config.AlwaysOnTop;
         FoldersFirstBox.IsChecked = _config.Behavior.FoldersFirst;
+        MatchingFoldersBox.IsChecked = _config.Behavior.ShowMatchingParentFolders;
+        CollapseMatchingFoldersBox.IsChecked = _config.Behavior.CollapseMatchingFolderResults;
         SearchContentsBox.IsChecked = _config.Behavior.SearchContents;
         HighlightMatchesBox.IsChecked = _config.Behavior.HighlightMatches;
+        ShowInternalPathsBox.IsChecked = _config.Behavior.ShowQsirchInternalPaths;
         QsirchThumbnailsBox.IsChecked = _config.Behavior.UseQsirchThumbnails;
         PreviewPaneBox.IsChecked = _config.Behavior.PreviewPane;
         AllowDownloadBox.IsChecked = _config.Behavior.AllowDownload;
-        RefreshCacheBox.IsChecked = _config.Behavior.RefreshCacheOnStartup;
         SelectTaggedItem(ThemeBox, string.IsNullOrWhiteSpace(_config.Behavior.Theme) ? "system" : _config.Behavior.Theme);
         SelectTaggedItem(ResultViewBox, string.IsNullOrWhiteSpace(_config.Behavior.ResultView) ? "details" : _config.Behavior.ResultView);
         SelectTaggedItem(ResultSortBox, FirstSortKey(_config.Behavior.ResultSort));
@@ -109,10 +113,8 @@ public partial class SettingsWindow : Window
         SearchTimeoutBox.Text = Math.Clamp(_config.Behavior.SearchTimeoutSeconds, 15, 300).ToString();
         FirstPageSizeBox.Text = Math.Clamp(_config.Behavior.FirstPageSize, 5, 500).ToString();
         NextPageSizeBox.Text = Math.Clamp(_config.Behavior.NextPageSize, 10, 500).ToString();
+        ResultLimitBox.Text = Math.Clamp(_config.Behavior.MaxSearchResults, 50, 5000).ToString();
         HistoryEnabledBox.IsChecked = _config.History.Enabled;
-        HistoryFileBox.Text = _config.History.File;
-        HistoryMaxBox.Text = _config.History.MaxEntries.ToString();
-        SelectTaggedItem(HistorySourceBox, string.IsNullOrWhiteSpace(_config.History.SourceFilter) ? "__this__" : _config.History.SourceFilter);
     }
 
     private void SaveClicked(object sender, RoutedEventArgs e)
@@ -120,11 +122,6 @@ public partial class SettingsWindow : Window
         if (!int.TryParse(PortBox.Text.Trim(), out var port) || port is < 1 or > 65535)
         {
             MessageBox.Show(this, "Port must be a number from 1 to 65535.", "Settings", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-        if (!int.TryParse(HistoryMaxBox.Text.Trim(), out var maxEntries) || maxEntries < 1)
-        {
-            MessageBox.Show(this, "Maximum history entries must be at least 1.", "Settings", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
         if (!int.TryParse(SearchTimeoutBox.Text.Trim(), out var searchTimeout) || searchTimeout is < 15 or > 300)
@@ -142,6 +139,11 @@ public partial class SettingsWindow : Window
             MessageBox.Show(this, "Next result page size must be from 10 to 500.", "Settings", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
+        if (!int.TryParse(ResultLimitBox.Text.Trim(), out var resultLimit) || resultLimit is < 50 or > 5000)
+        {
+            MessageBox.Show(this, "Initial result limit must be from 50 to 5000.", "Settings", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
 
         CommitTableEdits();
         _config.Host = HostBox.Text.Trim();
@@ -152,15 +154,18 @@ public partial class SettingsWindow : Window
         _config.SslVerify = SslVerifyBox.IsChecked == true;
         _config.Behavior.ShowInTaskbar = TaskbarBox.IsChecked == true;
         _config.Behavior.MinimizeToTray = MinimizeToTrayBox.IsChecked == true;
+        _config.Behavior.ExitToTray = ExitToTrayBox.IsChecked == true;
         _config.Behavior.ClearResultsWithQuery = ClearResultsWithQueryBox.IsChecked == true;
         _config.AlwaysOnTop = AlwaysOnTopBox.IsChecked == true;
         _config.Behavior.FoldersFirst = FoldersFirstBox.IsChecked == true;
+        _config.Behavior.ShowMatchingParentFolders = MatchingFoldersBox.IsChecked == true;
+        _config.Behavior.CollapseMatchingFolderResults = CollapseMatchingFoldersBox.IsChecked == true;
         _config.Behavior.SearchContents = SearchContentsBox.IsChecked == true;
         _config.Behavior.HighlightMatches = HighlightMatchesBox.IsChecked == true;
+        _config.Behavior.ShowQsirchInternalPaths = ShowInternalPathsBox.IsChecked == true;
         _config.Behavior.UseQsirchThumbnails = QsirchThumbnailsBox.IsChecked == true;
         _config.Behavior.PreviewPane = PreviewPaneBox.IsChecked == true;
         _config.Behavior.AllowDownload = AllowDownloadBox.IsChecked == true;
-        _config.Behavior.RefreshCacheOnStartup = RefreshCacheBox.IsChecked == true;
         _config.Behavior.Theme = SelectedTag(ThemeBox, "system");
         _config.Behavior.ResultView = SelectedTag(ResultViewBox, "details");
         _config.Behavior.ResultSort = SelectedTag(ResultSortBox, "recent");
@@ -168,10 +173,8 @@ public partial class SettingsWindow : Window
         _config.Behavior.SearchTimeoutSeconds = searchTimeout;
         _config.Behavior.FirstPageSize = firstPageSize;
         _config.Behavior.NextPageSize = nextPageSize;
+        _config.Behavior.MaxSearchResults = resultLimit;
         _config.History.Enabled = HistoryEnabledBox.IsChecked == true;
-        _config.History.File = string.IsNullOrWhiteSpace(HistoryFileBox.Text) ? "data\\history.json" : HistoryFileBox.Text.Trim();
-        _config.History.MaxEntries = maxEntries;
-        _config.History.SourceFilter = SelectedTag(HistorySourceBox, "__this__");
         _config.PathMappings = Mappings.Where(x => !string.IsNullOrWhiteSpace(x.ShareRoot) && !string.IsNullOrWhiteSpace(x.MappedRoot)).ToList();
         _config.Exclude.FolderRules = FolderRules
             .Select(x => new ScopedTextRule { Pattern = x.Pattern.Trim(), IsGlobal = x.IsGlobal })
@@ -185,8 +188,6 @@ public partial class SettingsWindow : Window
             .GroupBy(x => x.Pattern, StringComparer.OrdinalIgnoreCase)
             .Select(x => x.First())
             .ToList();
-        _config.Exclude.Folders = _config.Exclude.FolderRules.Select(x => x.Pattern).ToList();
-        _config.Exclude.Files = _config.Exclude.FileRules.Select(x => x.Pattern).ToList();
         _config.VisibilityRules = VisibilityRules
             .Where(x => !string.IsNullOrWhiteSpace(x.Pattern))
             .Select(x => new VisibilityRule
@@ -205,6 +206,14 @@ public partial class SettingsWindow : Window
     private void CancelClicked(object sender, RoutedEventArgs e)
     {
         DialogResult = false;
+    }
+
+    private void ResetDatabaseClicked(object sender, RoutedEventArgs e)
+    {
+        if (MessageBox.Show(this, "Clear this user's saved Favorites, folders, recent searches, and saved searches?", "Reset local saved data", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
+        {
+            ResetDatabaseRequested = true;
+        }
     }
 
     private void AddFolderRuleClicked(object sender, RoutedEventArgs e)

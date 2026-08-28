@@ -39,11 +39,15 @@ public static class ShellPreviewService
         return RenderShellImage(path, size, ShellImageFlags.BiggerSizeOk | ShellImageFlags.IconOnly);
     }
 
-    public static ImageSource? FileTypeIcon(string extension, bool isFolder, bool large = true)
+    public static ImageSource? FileTypeIcon(string extension, bool isFolder, bool large = true, bool openFolder = false)
     {
         var flags = ShellFileInfoFlags.Icon |
                     ShellFileInfoFlags.UseFileAttributes |
                     (large ? ShellFileInfoFlags.LargeIcon : ShellFileInfoFlags.SmallIcon);
+        if (isFolder && openFolder)
+        {
+            flags |= ShellFileInfoFlags.OpenIcon;
+        }
         var attributes = isFolder ? FileAttributes.Directory : FileAttributes.Normal;
         var name = isFolder ? "folder" : string.IsNullOrWhiteSpace(extension) ? "file" : "." + extension.TrimStart('.');
         var info = new ShellFileInfo();
@@ -160,6 +164,7 @@ public static class ShellPreviewService
     [Flags]
     private enum ShellFileInfoFlags : uint
     {
+        OpenIcon = 0x000000002,
         Icon = 0x000000100,
         LargeIcon = 0x000000000,
         SmallIcon = 0x000000001,

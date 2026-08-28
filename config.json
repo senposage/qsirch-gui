@@ -8,60 +8,62 @@
   "path_mappings": [],
   "visibility_rules": [],
   "history": {
-    "enabled": true,
-    "file": "data\\history.json",
-    "max_entries": 20000,
-    "source_filter": "__this__"
+    "enabled": true
   },
   "behavior": {
     "show_in_taskbar": true,
     "minimize_to_tray": false,
+    "exit_to_tray": false,
     "clear_results_with_query": false,
     "global_hotkey": "Ctrl+S",
     "theme": "system",
     "highlight_matches": true,
     "use_qsirch_thumbnails": false,
     "search_contents": false,
+    "exact_match": false,
     "preview_pane": false,
     "allow_download": false,
-    "refresh_cache_on_startup": false,
     "folders_first": true,
+    "show_matching_parent_folders": true,
+    "collapse_matching_folder_results": false,
+    "show_qsirch_internal_paths": false,
     "result_view": "details",
     "result_sort": "recent:desc",
+    "max_search_results": 500,
     "search_timeout_seconds": 90,
     "first_page_size": 15,
     "next_page_size": 100,
     "visible_detail_columns": [
-      "location",
       "name",
+      "location",
       "modified",
-      "size",
-      "type"
+      "type",
+      "size"
     ]
   },
-  "always_on_top": true,
+  "always_on_top": false,
   "pinned_tabs": [],
   "hosts": {},
   "exclude": {
-    "folders": [
-      "@Recently-Snapshot\\*",
-      "@Recycle\\*",
-      "#recycle\\*",
-      ".sync\\*",
-      ".qsync\\*",
-      ".qsync_sn\\*"
+    "folder_rules": [
+      { "pattern": "@Recently-Snapshot\\*", "global": true },
+      { "pattern": "@Recycle\\*", "global": true },
+      { "pattern": "#recycle\\*", "global": true },
+      { "pattern": ".sync\\*", "global": true },
+      { "pattern": ".qsync\\*", "global": true },
+      { "pattern": ".qsync_sn\\*", "global": true }
     ],
-    "files": [
-      "Thumbs.db",
-      "desktop.ini",
-      "*.tmp",
-      "~$*",
-      ".DS_Store",
-      "*.qsync",
-      "*.qsync_tmp",
-      "*.syncing",
-      "*_conflict_*",
-      "*conflicted copy*"
+    "file_rules": [
+      { "pattern": "Thumbs.db", "global": true },
+      { "pattern": "desktop.ini", "global": true },
+      { "pattern": "*.tmp", "global": true },
+      { "pattern": "~$*", "global": true },
+      { "pattern": ".DS_Store", "global": true },
+      { "pattern": "*.qsync", "global": true },
+      { "pattern": "*.qsync_tmp", "global": true },
+      { "pattern": "*.syncing", "global": true },
+      { "pattern": "*_conflict_*", "global": true },
+      { "pattern": "*conflicted copy*", "global": true }
     ]
   }
 }

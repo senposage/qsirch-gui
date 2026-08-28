@@ -5,15 +5,16 @@
         Title="PyQsirchgui"
         Width="1120"
         Height="720"
-        MinWidth="880"
-        MinHeight="560"
+        MinWidth="1120"
+        MinHeight="620"
         Icon="Assets/app.ico"
         WindowStyle="None"
         ResizeMode="CanResize"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource AppWindowBrush}"
         Foreground="{DynamicResource AppTextBrush}"
-        Loaded="WindowLoaded">
+        Loaded="WindowLoaded"
+        PreviewKeyDown="WindowPreviewKeyDown">
   <shell:WindowChrome.WindowChrome>
     <shell:WindowChrome CaptionHeight="42"
                         ResizeBorderThickness="7"
@@ -26,12 +27,19 @@
     <SolidColorBrush x:Key="AppSurfaceBrush" Color="#FFFFFF" />
     <SolidColorBrush x:Key="AppPanelBrush" Color="#FAFAFA" />
     <SolidColorBrush x:Key="AppElevatedBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="AppResultsBrush" Color="#F5F7F9" />
+    <SolidColorBrush x:Key="AppSearchInputBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="AppSearchInputBorderBrush" Color="#8A8A8A" />
     <SolidColorBrush x:Key="AppBorderBrush" Color="#D0D0D0" />
     <SolidColorBrush x:Key="AppSubtleBorderBrush" Color="#E5E5E5" />
     <SolidColorBrush x:Key="AppTextBrush" Color="#1B1B1B" />
     <SolidColorBrush x:Key="AppMutedTextBrush" Color="#666666" />
     <SolidColorBrush x:Key="AppAccentBrush" Color="#0067C0" />
     <SolidColorBrush x:Key="AppAccentSoftBrush" Color="#E5F1FB" />
+    <SolidColorBrush x:Key="AppCommandOpenBrush" Color="#0078D4" />
+    <SolidColorBrush x:Key="AppCommandPreviewBrush" Color="#7356BF" />
+    <SolidColorBrush x:Key="AppCommandFavoriteBrush" Color="#C78A00" />
+    <SolidColorBrush x:Key="AppCommandSaveBrush" Color="#107C10" />
     <SolidColorBrush x:Key="AppSelectionBrush" Color="#CCE8FF" />
     <SolidColorBrush x:Key="AppSelectionTextBrush" Color="#000000" />
     <SolidColorBrush x:Key="AppDisabledBrush" Color="#E9E9E9" />
@@ -79,6 +87,44 @@
       <Setter Property="FontWeight" Value="SemiBold" />
       <Setter Property="Padding" Value="16,5" />
     </Style>
+    <Style x:Key="SearchProgressBar" TargetType="ProgressBar">
+      <Setter Property="Width" Value="120" />
+      <Setter Property="Height" Value="6" />
+      <Setter Property="Foreground" Value="{DynamicResource AppAccentBrush}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ProgressBar">
+            <Border Background="{DynamicResource AppSubtleBorderBrush}"
+                    CornerRadius="3"
+                    SnapsToDevicePixels="True">
+              <Canvas ClipToBounds="True">
+                <Border x:Name="Indicator"
+                        Width="42"
+                        Height="6"
+                        Background="{TemplateBinding Foreground}"
+                        CornerRadius="3"
+                        Canvas.Left="-42" />
+              </Canvas>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsIndeterminate" Value="True">
+                <Trigger.EnterActions>
+                  <BeginStoryboard>
+                    <Storyboard RepeatBehavior="Forever">
+                      <DoubleAnimation Storyboard.TargetName="Indicator"
+                                       Storyboard.TargetProperty="(Canvas.Left)"
+                                       From="-42"
+                                       To="120"
+                                       Duration="0:0:1.1" />
+                    </Storyboard>
+                  </BeginStoryboard>
+                </Trigger.EnterActions>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
     <Style x:Key="CommandButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
       <Setter Property="MinHeight" Value="30" />
       <Setter Property="Padding" Value="10,4" />
@@ -99,11 +145,61 @@
       <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
       <Setter Property="FontSize" Value="15" />
     </Style>
+    <Style x:Key="OpenCommandIconButton" TargetType="Button" BasedOn="{StaticResource CommandIconButton}">
+      <Setter Property="Foreground" Value="{DynamicResource AppCommandOpenBrush}" />
+    </Style>
+    <Style x:Key="PreviewCommandIconButton" TargetType="Button" BasedOn="{StaticResource CommandIconButton}">
+      <Setter Property="Foreground" Value="{DynamicResource AppCommandPreviewBrush}" />
+    </Style>
+    <Style x:Key="SaveCommandIconButton" TargetType="Button" BasedOn="{StaticResource CommandIconButton}">
+      <Setter Property="Foreground" Value="{DynamicResource AppCommandSaveBrush}" />
+    </Style>
+    <Style x:Key="CommandIconToggle" TargetType="ToggleButton">
+      <Setter Property="Width" Value="32" />
+      <Setter Property="MinHeight" Value="30" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Margin" Value="0,0,2,0" />
+      <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ToggleButton">
+            <Border x:Name="Chrome"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="4">
+              <ContentPresenter HorizontalAlignment="Center"
+                                VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource AppAccentSoftBrush}" />
+                <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource AppSubtleBorderBrush}" />
+              </Trigger>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource AppAccentSoftBrush}" />
+                <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource AppDisabledBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource AppDisabledTextBrush}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
     <Style x:Key="FavoriteCommandButton" TargetType="Button" BasedOn="{StaticResource CommandButton}">
       <Setter Property="Width" Value="32" />
       <Setter Property="Padding" Value="0" />
       <Setter Property="FontFamily" Value="Segoe UI Symbol" />
       <Setter Property="FontSize" Value="17" />
+      <Setter Property="Foreground" Value="{DynamicResource AppCommandFavoriteBrush}" />
     </Style>
     <Style x:Key="CaptionButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
       <Setter Property="Width" Value="46" />
@@ -161,6 +257,45 @@
       <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
       <Setter Property="VerticalAlignment" Value="Center" />
       <Setter Property="Margin" Value="8,0,4,0" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="CheckBox">
+            <StackPanel Orientation="Horizontal">
+              <Border x:Name="Box"
+                      Width="16"
+                      Height="16"
+                      Margin="0,0,6,0"
+                      Background="{DynamicResource AppSurfaceBrush}"
+                      BorderBrush="{DynamicResource AppBorderBrush}"
+                      BorderThickness="1"
+                      CornerRadius="2">
+                <TextBlock x:Name="Mark"
+                           Text="&#xE73E;"
+                           FontFamily="Segoe MDL2 Assets"
+                           FontSize="11"
+                           Foreground="White"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"
+                           Visibility="Collapsed" />
+              </Border>
+              <ContentPresenter VerticalAlignment="Center" />
+            </StackPanel>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+              </Trigger>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="Box" Property="Background" Value="{DynamicResource AppAccentBrush}" />
+                <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+                <Setter TargetName="Mark" Property="Visibility" Value="Visible" />
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.6" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
     </Style>
     <Style TargetType="TabControl">
       <Setter Property="Background" Value="{DynamicResource AppPanelBrush}" />
@@ -397,6 +532,73 @@
       <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
       <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
     </Style>
+    <Style TargetType="TreeView">
+      <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+    </Style>
+    <Style TargetType="TreeViewItem">
+      <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+      <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}" />
+      <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="TreeViewItem">
+            <StackPanel>
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="18" />
+                  <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <ToggleButton x:Name="Expander"
+                              Grid.Column="0"
+                              Width="18"
+                              Height="22"
+                              IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}}"
+                              Background="Transparent"
+                              BorderThickness="0">
+                  <ToggleButton.Template>
+                    <ControlTemplate TargetType="ToggleButton">
+                      <TextBlock x:Name="Glyph"
+                                 Text="&#xE76C;"
+                                 FontFamily="Segoe MDL2 Assets"
+                                 FontSize="10"
+                                 Foreground="{DynamicResource AppMutedTextBrush}"
+                                 HorizontalAlignment="Center"
+                                 VerticalAlignment="Center" />
+                      <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                          <Setter TargetName="Glyph" Property="Text" Value="&#xE70D;" />
+                        </Trigger>
+                      </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                  </ToggleButton.Template>
+                </ToggleButton>
+                <Border x:Name="HeaderChrome" Grid.Column="1" Padding="2,1">
+                  <ContentPresenter ContentSource="Header" />
+                </Border>
+              </Grid>
+              <ItemsPresenter x:Name="ItemsHost" Margin="18,0,0,0" />
+            </StackPanel>
+            <ControlTemplate.Triggers>
+              <Trigger Property="HasItems" Value="False">
+                <Setter TargetName="Expander" Property="Visibility" Value="Hidden" />
+              </Trigger>
+              <Trigger Property="IsExpanded" Value="False">
+                <Setter TargetName="ItemsHost" Property="Visibility" Value="Collapsed" />
+              </Trigger>
+              <Trigger SourceName="HeaderChrome" Property="IsMouseOver" Value="True">
+                <Setter TargetName="HeaderChrome" Property="Background" Value="{DynamicResource AppAccentSoftBrush}" />
+              </Trigger>
+              <Trigger Property="IsSelected" Value="True">
+                <Setter TargetName="HeaderChrome" Property="Background" Value="{DynamicResource AppSelectionBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource AppSelectionTextBrush}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
     <Style TargetType="GridViewColumnHeader">
       <Setter Property="MinHeight" Value="30" />
       <Setter Property="Padding" Value="8,5" />
@@ -460,6 +662,10 @@
         </Setter.Value>
       </Setter>
       <Style.Triggers>
+        <DataTrigger Binding="{Binding IsMatchingSearchFolder}" Value="True">
+          <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+          <Setter Property="BorderThickness" Value="3,0,0,0" />
+        </DataTrigger>
         <Trigger Property="IsSelected" Value="True">
           <Setter Property="Foreground" Value="{DynamicResource AppSelectionTextBrush}" />
         </Trigger>
@@ -469,6 +675,8 @@
       <Setter Property="MinHeight" Value="38" />
       <Setter Property="Padding" Value="4,2" />
       <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppSubtleBorderBrush}" />
+      <Setter Property="BorderThickness" Value="0,0,0,1" />
       <Setter Property="HorizontalContentAlignment" Value="Stretch" />
       <Setter Property="VerticalContentAlignment" Value="Center" />
       <Setter Property="Template">
@@ -496,6 +704,10 @@
         </Setter.Value>
       </Setter>
       <Style.Triggers>
+        <DataTrigger Binding="{Binding IsMatchingSearchFolder}" Value="True">
+          <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+          <Setter Property="BorderThickness" Value="3,0,0,0" />
+        </DataTrigger>
         <Trigger Property="IsSelected" Value="True">
           <Setter Property="Foreground" Value="{DynamicResource AppSelectionTextBrush}" />
         </Trigger>
@@ -520,9 +732,16 @@
         </DataTrigger>
       </Style.Triggers>
     </Style>
-    <DataTemplate x:Key="FavoriteTemplate">
-      <TextBlock Text="{Binding FileName}" TextTrimming="CharacterEllipsis" Padding="6,4" />
-    </DataTemplate>
+    <HierarchicalDataTemplate x:Key="FavoriteTreeNodeTemplate" ItemsSource="{Binding Children}">
+      <StackPanel Orientation="Horizontal" Margin="2,3,4,3" ToolTip="{Binding ToolTip}">
+        <TextBlock Text="{Binding Glyph}"
+                   FontFamily="Segoe MDL2 Assets"
+                   FontSize="16"
+                   Foreground="{DynamicResource AppMutedTextBrush}"
+                   Margin="0,0,8,0" />
+        <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" FontSize="14" />
+      </StackPanel>
+    </HierarchicalDataTemplate>
     <DataTemplate x:Key="DetailsNameTemplate">
       <DockPanel LastChildFill="True">
         <Button DockPanel.Dock="Right"
@@ -553,7 +772,17 @@
         </Border>
         <TextBlock Text="{Binding FileName}"
                    TextTrimming="CharacterEllipsis"
-                   VerticalAlignment="Center" />
+                   VerticalAlignment="Center">
+          <TextBlock.Style>
+            <Style TargetType="TextBlock">
+              <Style.Triggers>
+                <DataTrigger Binding="{Binding IsMatchingSearchFolder}" Value="True">
+                  <Setter Property="FontWeight" Value="SemiBold" />
+                </DataTrigger>
+              </Style.Triggers>
+            </Style>
+          </TextBlock.Style>
+        </TextBlock>
       </DockPanel>
     </DataTemplate>
     <DataTemplate x:Key="DetailsLocationTemplate">
@@ -698,11 +927,14 @@
         </Grid.ColumnDefinitions>
 
         <StackPanel Grid.Column="0" Orientation="Horizontal">
-          <Button Content="Open" Style="{StaticResource CommandButton}" Click="OpenClicked" ToolTip="Open selected item" />
-          <Button Content="Show" Style="{StaticResource CommandButton}" Click="ShowClicked" ToolTip="Show selected item in File Explorer" />
+          <Button Content="&#xE8E5;" Style="{StaticResource OpenCommandIconButton}" Click="OpenClicked" ToolTip="Open selected item" />
+          <Button Content="&#xE8B7;" Style="{StaticResource OpenCommandIconButton}" Click="ShowClicked" ToolTip="Show selected item in File Explorer" />
           <Border Width="1" Height="20" Margin="7,5" Background="{DynamicResource AppSubtleBorderBrush}" />
-          <Button x:Name="PreviewToggle" Content="Preview" Style="{StaticResource CommandButton}" Click="PreviewToggleClicked" ToolTip="Show preview pane" />
+          <Button x:Name="PreviewToggle" Content="&#xE890;" Style="{StaticResource PreviewCommandIconButton}" Click="PreviewToggleClicked" ToolTip="Show preview pane" />
           <Button x:Name="FavoritesToggle" Content="★" Style="{StaticResource FavoriteCommandButton}" Click="FavoritesToggleClicked" ToolTip="Show Favorites" />
+          <Button Content="&#xE902;" Style="{StaticResource SaveCommandIconButton}" Click="AddToGroupClicked" ToolTip="Add selected result to a Favorites group" />
+          <Button Content="&#xE105;" Style="{StaticResource SaveCommandIconButton}" Click="SaveSearchClicked" ToolTip="Save the current search in Favorites" />
+          <Button Content="&#xE897;" Style="{StaticResource OpenCommandIconButton}" Click="HelpClicked" ToolTip="Help and support" />
         </StackPanel>
         <StackPanel Grid.Column="2" Orientation="Horizontal">
           <Button Content="&#xE713;" Style="{StaticResource CommandIconButton}" Click="SettingsClicked" ToolTip="Settings" />
@@ -767,6 +999,7 @@
         <Border Grid.Row="1" Background="{DynamicResource AppSubtleBorderBrush}" />
         <DockPanel Grid.Row="2" LastChildFill="True" Margin="10,10,10,9">
           <Button Content="Search" DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Click="SearchClicked" />
+          <Button Content="Load more" DockPanel.Dock="Right" Style="{StaticResource CommandButton}" Click="LoadMoreClicked" ToolTip="Request another block of results" />
           <Button Content="Stop" DockPanel.Dock="Right" Style="{StaticResource CommandButton}" Click="StopClicked" ToolTip="Stop this search" />
           <Button Content="Clear" DockPanel.Dock="Right" Style="{StaticResource CommandButton}" Click="ClearClicked" ToolTip="Clear this tab" />
           <ComboBox x:Name="ViewBox"
@@ -775,12 +1008,28 @@
                     ItemsSource="{Binding ViewModes}"
                     ToolTip="Results view"
                     SelectionChanged="ViewChanged" />
-          <ComboBox x:Name="SortBox"
-                    DockPanel.Dock="Right"
-                    Width="132"
-                    ItemsSource="{Binding SortModes}"
-                    ToolTip="{Binding SortSummaryText}"
-                    SelectionChanged="SortChanged" />
+          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+            <TextBlock Text="Arrange"
+                       Margin="10,0,5,0"
+                       VerticalAlignment="Center"
+                       Foreground="{DynamicResource AppMutedTextBrush}" />
+            <ComboBox x:Name="SortBox"
+                      Width="132"
+                      ItemsSource="{Binding SortModes}"
+                      ToolTip="Arrange results"
+                      SelectionChanged="SortChanged" />
+          </StackPanel>
+          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+            <TextBlock Text="Scope"
+                       Margin="10,0,5,0"
+                       VerticalAlignment="Center"
+                       Foreground="{DynamicResource AppMutedTextBrush}" />
+            <ComboBox x:Name="ScopeBox"
+                      Width="136"
+                      ItemsSource="{Binding SearchScopes}"
+                      ToolTip="Select a folder result before using This folder"
+                      SelectionChanged="ScopeChanged" />
+          </StackPanel>
           <ToggleButton x:Name="TypeFilterButton"
                         DockPanel.Dock="Right"
                         Width="148"
@@ -823,16 +1072,64 @@
               </DockPanel>
             </Border>
           </Popup>
+          <ToggleButton x:Name="RecentSearchButton"
+                        DockPanel.Dock="Right"
+                        Width="34"
+                        Content="&#xE823;"
+                        Style="{StaticResource CommandIconToggle}"
+                        ToolTip="Recent searches" />
+          <Popup Placement="Bottom"
+                 PlacementTarget="{Binding ElementName=RecentSearchButton}"
+                 IsOpen="{Binding IsChecked, ElementName=RecentSearchButton, Mode=TwoWay}"
+                 StaysOpen="False"
+                 AllowsTransparency="True"
+                 PopupAnimation="Fade">
+            <Border Width="270"
+                    Background="{DynamicResource AppElevatedBrush}"
+                    BorderBrush="{DynamicResource AppBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="4"
+                    Padding="5">
+              <ListBox x:Name="RecentSearchList"
+                       ItemsSource="{Binding RecentSearches}"
+                       SelectionChanged="RecentSearchSelected"
+                       BorderThickness="0">
+                <ListBox.ItemTemplate>
+                  <DataTemplate>
+                    <TextBlock Text="{Binding}" TextTrimming="CharacterEllipsis" Padding="6,4" />
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </Border>
+          </Popup>
           <CheckBox x:Name="SearchContentsToggle"
                     Content="Search contents"
                     DockPanel.Dock="Right"
                     Checked="SearchContentsChanged"
                     Unchecked="SearchContentsChanged" />
-          <Border Background="{DynamicResource AppElevatedBrush}"
-                  BorderBrush="{DynamicResource AppBorderBrush}"
+          <CheckBox x:Name="ExactMatchToggle"
+                    Content="Exact match"
+                    DockPanel.Dock="Right"
+                    Margin="0,0,10,0"
+                    Checked="ExactMatchChanged"
+                    Unchecked="ExactMatchChanged"
+                    ToolTip="Match complete words in file names" />
+          <Border x:Name="SearchBoxChrome"
+                  MinWidth="280"
                   BorderThickness="1"
                   CornerRadius="4"
                   Margin="0,0,8,0">
+            <Border.Style>
+              <Style TargetType="Border">
+                <Setter Property="Background" Value="{DynamicResource AppSearchInputBrush}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource AppSearchInputBorderBrush}" />
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding IsKeyboardFocusWithin, ElementName=SearchText}" Value="True">
+                    <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </Border.Style>
             <Grid>
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="34" />
@@ -847,6 +1144,7 @@
               <TextBox x:Name="SearchText"
                        Grid.Column="1"
                        BorderThickness="0"
+                       Background="Transparent"
                        Padding="0,6,8,6"
                        Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}"
                        KeyDown="SearchKeyDown" />
@@ -862,8 +1160,7 @@
         <ColumnDefinition Width="*" />
         <ColumnDefinition Width="Auto" />
       </Grid.ColumnDefinitions>
-      <ProgressBar Width="96"
-                   Height="4"
+      <ProgressBar Style="{StaticResource SearchProgressBar}"
                    IsIndeterminate="True"
                    Visibility="{Binding BusyVisibility}" />
       <TextBlock Grid.Column="1"
@@ -894,21 +1191,30 @@
               <TextBlock Text="★ Favorites" FontWeight="SemiBold" VerticalAlignment="Center" />
             </DockPanel>
           </Border>
-          <ListBox x:Name="FavoritesList"
-                   ItemsSource="{Binding FavoriteResults}"
-                   ItemTemplate="{StaticResource FavoriteTemplate}"
-                   SelectionChanged="FavoriteSelectionChanged"
-                   MouseDoubleClick="FavoriteDoubleClicked"
-                   PreviewMouseRightButtonDown="ResultRightButtonDown"
-                   BorderThickness="0">
-            <ListBox.ContextMenu>
-              <ContextMenu>
-                <MenuItem Header="Open" Click="OpenFavoriteClicked" />
-                <MenuItem Header="Show" Click="ShowFavoriteClicked" />
-                <MenuItem Header="Unfavorite" Click="UnfavoriteClicked" />
+          <TreeView x:Name="FavoritesTree"
+                    Margin="6,5,6,6"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    Foreground="{DynamicResource AppTextBrush}"
+                    ItemTemplate="{StaticResource FavoriteTreeNodeTemplate}"
+                    SelectedItemChanged="FavoritesTreeSelected"
+                    MouseDoubleClick="FavoritesTreeDoubleClicked"
+                    PreviewMouseRightButtonDown="FavoriteTreeRightButtonDown"
+                    ToolTip="Favorites organized into folders">
+            <TreeView.ContextMenu>
+              <ContextMenu Opened="FavoriteContextMenuOpened">
+                <MenuItem x:Name="OpenFavoriteMenuItem" Header="Open" Click="OpenFavoriteClicked" />
+                <MenuItem x:Name="ShowFavoriteMenuItem" Header="Show" Click="ShowFavoriteClicked" />
+                <MenuItem x:Name="CopyFavoritePathMenuItem" Header="Copy full path" Click="CopyFavoritePathClicked" />
+                <MenuItem x:Name="AddFavoriteToGroupMenuItem" Header="Add to group..." Click="AddFavoriteToGroupClicked" />
+                <MenuItem x:Name="RunSavedSearchMenuItem" Header="Run saved search" Click="RunSavedSearchClicked" />
+                <Separator x:Name="FavoriteActionSeparator" />
+                <MenuItem x:Name="DeleteFavoriteFolderMenuItem" Header="Delete folder" Click="DeleteFavoriteFolderClicked" />
+                <MenuItem x:Name="DeleteSavedSearchMenuItem" Header="Delete saved search" Click="DeleteSavedSearchClicked" />
+                <MenuItem x:Name="RemoveFavoriteMenuItem" Header="Remove from Favorites" Click="UnfavoriteClicked" ToolTip="Removes this saved entry without deleting the file" />
               </ContextMenu>
-            </ListBox.ContextMenu>
-          </ListBox>
+            </TreeView.ContextMenu>
+          </TreeView>
         </DockPanel>
       </Border>
 
@@ -918,7 +1224,7 @@
                     HorizontalAlignment="Stretch"
                     Background="{DynamicResource AppWindowBrush}" />
 
-      <Grid Grid.Column="2" Margin="10,0">
+      <Grid Grid.Column="2" Margin="10,0" Background="{DynamicResource AppResultsBrush}">
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto" />
           <RowDefinition Height="*" />
@@ -943,7 +1249,9 @@
         </Border>
         <ListView x:Name="DetailsList"
                   Grid.Row="1"
-                  ItemsSource="{Binding VisibleResults}"
+                  ItemsSource="{Binding GroupedDetailsResults}"
+                  Background="{DynamicResource AppResultsBrush}"
+                  SelectionMode="Extended"
                   MouseDoubleClick="ResultDoubleClicked"
                   SelectionChanged="ResultSelectionChanged"
                   PreviewMouseRightButtonDown="ResultRightButtonDown"
@@ -954,20 +1262,63 @@
           <ListView.ContextMenu>
             <ContextMenu>
               <MenuItem Header="Open" Click="OpenClicked" />
+              <MenuItem Header="Open in new tab" Click="OpenInNewTabClicked" />
               <MenuItem Header="Show" Click="ShowClicked" />
+              <MenuItem Header="Properties" Click="PropertiesClicked" />
+              <Separator />
+              <MenuItem Header="Copy full path" Click="CopyPathClicked" />
+              <Separator />
               <MenuItem Header="Add to Favorites" Click="FavoriteClicked" />
+              <MenuItem Header="Add to group..." Click="AddToGroupClicked" />
             </ContextMenu>
           </ListView.ContextMenu>
+          <ListView.GroupStyle>
+            <GroupStyle>
+              <GroupStyle.ContainerStyle>
+                <Style TargetType="GroupItem">
+                  <Setter Property="Template">
+                    <Setter.Value>
+                      <ControlTemplate TargetType="GroupItem">
+                        <Border Margin="0,5,0,1"
+                                BorderBrush="{DynamicResource AppSubtleBorderBrush}"
+                                BorderThickness="0,1,0,0">
+                          <Expander IsExpanded="True">
+                            <Expander.Header>
+                              <DockPanel Margin="5,6,6,5">
+                                <TextBlock Text="&#xE8B7;"
+                                           FontFamily="Segoe MDL2 Assets"
+                                           FontSize="16"
+                                           Margin="0,0,7,0"
+                                           Foreground="{DynamicResource AppMutedTextBrush}" />
+                                <TextBlock Text="{Binding Name.Name}"
+                                           FontWeight="SemiBold"
+                                           VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding ItemCount, StringFormat={}{0} results}"
+                                           Margin="9,0,0,0"
+                                           Foreground="{DynamicResource AppMutedTextBrush}"
+                                           VerticalAlignment="Center" />
+                              </DockPanel>
+                            </Expander.Header>
+                            <ItemsPresenter />
+                          </Expander>
+                        </Border>
+                      </ControlTemplate>
+                    </Setter.Value>
+                  </Setter>
+                </Style>
+              </GroupStyle.ContainerStyle>
+            </GroupStyle>
+          </ListView.GroupStyle>
           <ListView.View>
             <GridView>
-              <GridViewColumn x:Name="LocationColumn" CellTemplate="{StaticResource DetailsLocationTemplate}" Width="330">
-                <GridViewColumn.Header>
-                  <GridViewColumnHeader x:Name="LocationHeader" Content="Location" Tag="location" Click="DetailsHeaderClicked" />
-                </GridViewColumn.Header>
-              </GridViewColumn>
               <GridViewColumn x:Name="NameColumn" CellTemplate="{StaticResource DetailsNameTemplate}" Width="280">
                 <GridViewColumn.Header>
                   <GridViewColumnHeader x:Name="NameHeader" Content="Name" Tag="name" Click="DetailsHeaderClicked" />
+                </GridViewColumn.Header>
+              </GridViewColumn>
+              <GridViewColumn x:Name="LocationColumn" CellTemplate="{StaticResource DetailsLocationTemplate}" Width="330">
+                <GridViewColumn.Header>
+                  <GridViewColumnHeader x:Name="LocationHeader" Content="Location" Tag="location" Click="DetailsHeaderClicked" />
                 </GridViewColumn.Header>
               </GridViewColumn>
               <GridViewColumn x:Name="DateColumn" CellTemplate="{StaticResource DetailsDateTemplate}" Width="150">
@@ -975,14 +1326,14 @@
                   <GridViewColumnHeader x:Name="DateHeader" Content="Date" Tag="modified" Click="DetailsHeaderClicked" />
                 </GridViewColumn.Header>
               </GridViewColumn>
-              <GridViewColumn x:Name="SizeColumn" DisplayMemberBinding="{Binding SizeText}" Width="80">
-                <GridViewColumn.Header>
-                  <GridViewColumnHeader x:Name="SizeHeader" Content="Size" Tag="size" Click="DetailsHeaderClicked" />
-                </GridViewColumn.Header>
-              </GridViewColumn>
               <GridViewColumn x:Name="TypeColumn" DisplayMemberBinding="{Binding Kind}" Width="90">
                 <GridViewColumn.Header>
                   <GridViewColumnHeader x:Name="TypeHeader" Content="Type" Tag="type" Click="DetailsHeaderClicked" />
+                </GridViewColumn.Header>
+              </GridViewColumn>
+              <GridViewColumn x:Name="SizeColumn" DisplayMemberBinding="{Binding SizeText}" Width="80">
+                <GridViewColumn.Header>
+                  <GridViewColumnHeader x:Name="SizeHeader" Content="Size" Tag="size" Click="DetailsHeaderClicked" />
                 </GridViewColumn.Header>
               </GridViewColumn>
             </GridView>
@@ -992,6 +1343,8 @@
         <ListBox x:Name="IconGrid"
                  Grid.Row="1"
                  ItemsSource="{Binding VisibleResults}"
+                 Background="{DynamicResource AppResultsBrush}"
+                 SelectionMode="Extended"
                  MouseDoubleClick="ResultDoubleClicked"
                  SelectionChanged="ResultSelectionChanged"
                  PreviewMouseRightButtonDown="ResultRightButtonDown"
@@ -1005,8 +1358,14 @@
           <ListBox.ContextMenu>
             <ContextMenu>
               <MenuItem Header="Open" Click="OpenClicked" />
+              <MenuItem Header="Open in new tab" Click="OpenInNewTabClicked" />
               <MenuItem Header="Show" Click="ShowClicked" />
+              <MenuItem Header="Properties" Click="PropertiesClicked" />
+              <Separator />
+              <MenuItem Header="Copy full path" Click="CopyPathClicked" />
+              <Separator />
               <MenuItem Header="Add to Favorites" Click="FavoriteClicked" />
+              <MenuItem Header="Add to group..." Click="AddToGroupClicked" />
             </ContextMenu>
           </ListBox.ContextMenu>
           <ListBox.ItemsPanel>
@@ -1019,6 +1378,8 @@
         <ListBox x:Name="ExplorerList"
                  Grid.Row="1"
                  ItemsSource="{Binding VisibleResults}"
+                 Background="{DynamicResource AppResultsBrush}"
+                 SelectionMode="Extended"
                  MouseDoubleClick="ResultDoubleClicked"
                  SelectionChanged="ResultSelectionChanged"
                  PreviewMouseRightButtonDown="ResultRightButtonDown"
@@ -1031,11 +1392,34 @@
           <ListBox.ContextMenu>
             <ContextMenu>
               <MenuItem Header="Open" Click="OpenClicked" />
+              <MenuItem Header="Open in new tab" Click="OpenInNewTabClicked" />
               <MenuItem Header="Show" Click="ShowClicked" />
+              <MenuItem Header="Properties" Click="PropertiesClicked" />
+              <Separator />
+              <MenuItem Header="Copy full path" Click="CopyPathClicked" />
+              <Separator />
               <MenuItem Header="Add to Favorites" Click="FavoriteClicked" />
+              <MenuItem Header="Add to group..." Click="AddToGroupClicked" />
             </ContextMenu>
           </ListBox.ContextMenu>
         </ListBox>
+        <Border Grid.Row="1"
+                Background="{DynamicResource AppResultsBrush}"
+                Visibility="{Binding EmptyStateVisibility}">
+          <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="360">
+            <TextBlock Text="&#xE721;"
+                       FontFamily="Segoe MDL2 Assets"
+                       FontSize="30"
+                       Foreground="{DynamicResource AppMutedTextBrush}"
+                       HorizontalAlignment="Center"
+                       Margin="0,0,0,10" />
+            <TextBlock Text="{Binding EmptyStateText}"
+                       FontSize="15"
+                       FontWeight="SemiBold"
+                       TextAlignment="Center"
+                       TextWrapping="Wrap" />
+          </StackPanel>
+        </Border>
       </Grid>
 
       <GridSplitter x:Name="PreviewSplitter"
@@ -1077,7 +1461,7 @@
     </Grid>
 
     <TextBlock Grid.Row="6"
-               Text="v0.9  Written by Robert J Crane"
+               Text="v1.0.0  Written by Robert J Crane"
                Margin="14,0"
                VerticalAlignment="Center"
                Foreground="{DynamicResource AppMutedTextBrush}" />

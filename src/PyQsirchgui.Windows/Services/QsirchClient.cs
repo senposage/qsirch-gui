@@ -175,7 +175,8 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
                         var objectBytes = buffer.GetRange(objectStart, parseIndex - objectStart + 1).ToArray();
                         using var doc = JsonDocument.Parse(objectBytes);
                         var result = ResultFromJson(doc.RootElement.Clone());
-                        if (typeFilter.Extensions.Length == 0 || typeFilter.Extensions.Contains(result.Extension, StringComparer.OrdinalIgnoreCase))
+                        if ((result.IsFolder && typeFilter.IncludeFolders) ||
+                            (!result.IsFolder && (typeFilter.IncludeAllFiles || typeFilter.Extensions.Contains(result.Extension, StringComparer.OrdinalIgnoreCase))))
                         {
                             results.Add(result);
                             pendingBatch.Add(result);

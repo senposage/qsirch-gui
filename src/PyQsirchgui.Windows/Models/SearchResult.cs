@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
 using System.Runtime.CompilerServices;
@@ -10,14 +11,65 @@ public sealed class SearchResult : INotifyPropertyChanged
 {
     private ImageSource? _iconSource;
     private bool _isFavorite;
+    private List<string> _groups = [];
+    private string _resolvedPath = "";
+    private string _windowsPath = "";
+    private bool _showInternalPath;
 
     public string Name { get; set; } = "";
     public string Extension { get; set; } = "";
     public string Path { get; set; } = "";
+    public string ResolvedPath
+    {
+        get => _resolvedPath;
+        set
+        {
+            var normalized = value ?? "";
+            if (_resolvedPath.Equals(normalized, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+            _resolvedPath = normalized;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(DisplayPath));
+        }
+    }
+    public string WindowsPath
+    {
+        get => _windowsPath;
+        set
+        {
+            var normalized = value ?? "";
+            if (_windowsPath.Equals(normalized, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+            _windowsPath = normalized;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(DisplayPath));
+        }
+    }
     public string Type { get; set; } = "";
     public long Size { get; set; }
     public string Modified { get; set; } = "";
     public bool IsFolder { get; set; }
+    public bool IsSearchFolderPresentation { get; set; }
+    public bool IsMatchingSearchFolder { get; set; }
+    public ExplorerResultGroup? ExplorerGroup { get; set; }
+    public bool ShowInternalPath
+    {
+        get => _showInternalPath;
+        set
+        {
+            if (_showInternalPath == value)
+            {
+                return;
+            }
+            _showInternalPath = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(DisplayPath));
+        }
+    }
     public bool IsFavorite
     {
         get => _isFavorite;
@@ -28,6 +80,24 @@ public sealed class SearchResult : INotifyPropertyChanged
                 return;
             }
             _isFavorite = value;
+            OnPropertyChanged();
+        }
+    }
+    public List<string> Groups
+    {
+        get => _groups;
+        set
+        {
+            var normalized = value
+                .Where(group => !string.IsNullOrWhiteSpace(group))
+                .Select(group => group.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (_groups.SequenceEqual(normalized, StringComparer.OrdinalIgnoreCase))
+            {
+                return;
+            }
+            _groups = normalized;
             OnPropertyChanged();
         }
     }
@@ -59,12 +129,7 @@ public sealed class SearchResult : INotifyPropertyChanged
     {
         get
         {
-            var text = Path.Replace('/', '\\').Trim('\\');
-            if (text.StartsWith("Shared\\", StringComparison.OrdinalIgnoreCase))
-            {
-                text = text[7..];
-            }
-            return text;
+            return ShowInternalPath ? Path.Replace('/', '\\').Trim() : WindowsPath;
         }
     }
 
@@ -178,6 +243,8 @@ public sealed class FileTypeFilter
     public string Name { get; init; } = "";
     public string Category { get; init; } = "All";
     public string[] Extensions { get; init; } = [];
+    public bool IncludeFolders { get; init; }
+    public bool IncludeAllFiles { get; init; }
 
     public override string ToString() => Name;
 }
@@ -203,5 +270,44 @@ public sealed class ResultSortMode
     public string Name { get; init; } = "";
     public string Key { get; init; } = "recent";
 
+    public override string ToString() => Name;
+}
+
+public sealed class SearchScope
+{
+    public string Name { get; init; } = "";
+    public string Key { get; init; } = "all";
+
+    public override string ToString() => Name;
+}
+
+public sealed class FavoriteGroupNode
+{
+    public string Name { get; init; } = "";
+    public string Path { get; init; } = "";
+    public bool IsAllFavorites { get; init; }
+    public bool IsSelected { get; set; }
+    public ObservableCollection<FavoriteGroupNode> Children { get; } = [];
+    public string Glyph => IsAllFavorites ? "\uE73A" : "\uE8B7";
+}
+
+public sealed class FavoriteTreeNode
+{
+    public string Name { get; init; } = "";
+    public string FolderPath { get; init; } = "";
+    public SearchResult? Result { get; init; }
+    public SavedSearch? SavedSearch { get; init; }
+    public bool IsSelected { get; set; }
+    public bool IsExpanded { get; set; }
+    public ObservableCollection<FavoriteTreeNode> Children { get; } = [];
+    public bool IsFolder => Result == null && SavedSearch == null;
+    public string Glyph => IsFolder ? "\uE8B7" : SavedSearch != null ? "\uE8A2" : Result!.IconGlyph;
+    public string ToolTip => IsFolder ? Name : SavedSearch != null ? SavedSearch.Query : $"{Result!.FileName}\n{Result.DisplayPath}";
+}
+
+public sealed record SavedSearch(long Id, string Name, string Query);
+
+public sealed record ExplorerResultGroup(string Key, string Name, string Location)
+{
     public override string ToString() => Name;
 }

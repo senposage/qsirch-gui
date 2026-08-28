@@ -7,9 +7,10 @@ namespace PyQsirchgui.Windows.Services;
 public static class AppLogger
 {
     private static readonly object Gate = new();
-    private static readonly ConcurrentQueue<string> Pending = new();
+    private static readonly ConcurrentQueue<LogEntry> Pending = new();
     private static int _draining;
     private const long MaxBytes = 2 * 1024 * 1024;
+    private const long MaxSessionLogBytes = 256 * 1024;
 
     public static string LogPath
     {
@@ -18,6 +19,12 @@ public static class AppLogger
             return Path.Combine(ConfigStore.PortableRoot, "logs", "PyQsirchgui.log");
         }
     }
+
+    public static string SessionLogPath => Path.Combine(ConfigStore.PortableRoot, "logs", "PyQsirchgui.sessions.log");
+
+    public static string SearchLogPath => Path.Combine(ConfigStore.PortableRoot, "logs", "PyQsirchgui.search.log");
+
+    public static string ClientLogPath => Path.Combine(ConfigStore.PortableRoot, "logs", "PyQsirchgui.client.log");
 
     public static IDisposable Measure(string area, string message)
     {
@@ -34,12 +41,30 @@ public static class AppLogger
         Write("ERROR", area, $"{message}: {ex}".Replace(Environment.NewLine, " | "));
     }
 
+    public static void Session(string message)
+    {
+        try
+        {
+            var sessionPath = SessionLogPath;
+            var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [SESSION] {Environment.MachineName}\\{Environment.UserName} {message}{Environment.NewLine}";
+            Directory.CreateDirectory(Path.GetDirectoryName(sessionPath) ?? AppContext.BaseDirectory);
+            lock (Gate)
+            {
+                RotateIfNeeded(sessionPath, MaxSessionLogBytes);
+                File.AppendAllText(sessionPath, line);
+            }
+        }
+        catch
+        {
+        }
+    }
+
     private static void Write(string level, string area, string message)
     {
         try
         {
             var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{level}] [{area}] {Environment.MachineName}\\{Environment.UserName} {message}{Environment.NewLine}";
-            Pending.Enqueue(line);
+            Pending.Enqueue(new LogEntry(LogPathForArea(area), line));
             if (Interlocked.Exchange(ref _draining, 1) == 0)
             {
                 _ = Task.Run(DrainAsync);
@@ -54,15 +79,28 @@ public static class AppLogger
     {
         try
         {
-            var logPath = LogPath;
-            Directory.CreateDirectory(Path.GetDirectoryName(logPath) ?? AppContext.BaseDirectory);
+            var pendingByPath = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            while (Pending.TryDequeue(out var entry))
+            {
+                if (!pendingByPath.TryGetValue(entry.Path, out var lines))
+                {
+                    lines = [];
+                    pendingByPath.Add(entry.Path, lines);
+                }
+                lines.Add(entry.Line);
+            }
+
             lock (Gate)
             {
-                RotateIfNeeded(logPath);
-                using var writer = new StreamWriter(new FileStream(logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite));
-                while (Pending.TryDequeue(out var line))
+                foreach (var (logPath, lines) in pendingByPath)
                 {
-                    writer.Write(line);
+                    Directory.CreateDirectory(Path.GetDirectoryName(logPath) ?? AppContext.BaseDirectory);
+                    RotateIfNeeded(logPath, MaxBytes);
+                    using var writer = new StreamWriter(new FileStream(logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite));
+                    foreach (var line in lines)
+                    {
+                        writer.Write(line);
+                    }
                 }
             }
         }
@@ -79,9 +117,9 @@ public static class AppLogger
         }
     }
 
-    private static void RotateIfNeeded(string logPath)
+    private static void RotateIfNeeded(string logPath, long maxBytes)
     {
-        if (!File.Exists(logPath) || new FileInfo(logPath).Length < MaxBytes)
+        if (!File.Exists(logPath) || new FileInfo(logPath).Length < maxBytes)
         {
             return;
         }
@@ -93,6 +131,15 @@ public static class AppLogger
         }
         File.Move(logPath, oldPath);
     }
+
+    private static string LogPathForArea(string area) => area switch
+    {
+        "search" or "filter" or "paint" or "rules" or "index" => SearchLogPath,
+        "qsirch" => ClientLogPath,
+        _ => LogPath,
+    };
+
+    private sealed record LogEntry(string Path, string Line);
 
     private sealed class LogTimer(string area, string message) : IDisposable
     {

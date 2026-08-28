@@ -53,7 +53,7 @@ public sealed class AppConfig
     public void ApplyCurrentHost()
     {
         CaptureRootConnectionDefaults();
-        NormalizeRules(Exclude, global: true);
+        MigrateLegacySettings();
         foreach (var rule in VisibilityRules)
         {
             rule.IsGlobal = true;
@@ -61,8 +61,6 @@ public sealed class AppConfig
 
         if (!Hosts.TryGetValue(CurrentHostKey, out var host))
         {
-            Exclude.Folders = Exclude.FolderRules.Select(x => x.Pattern).ToList();
-            Exclude.Files = Exclude.FileRules.Select(x => x.Pattern).ToList();
             return;
         }
 
@@ -87,8 +85,6 @@ public sealed class AppConfig
             FolderRules = globalExclude.FolderRules.Where(x => x.IsGlobal).Select(CloneTextRule).Concat(host.Exclude.FolderRules.Where(x => !x.IsGlobal).Select(CloneTextRule)).ToList(),
             FileRules = globalExclude.FileRules.Where(x => x.IsGlobal).Select(CloneTextRule).Concat(host.Exclude.FileRules.Where(x => !x.IsGlobal).Select(CloneTextRule)).ToList(),
         };
-        Exclude.Folders = Exclude.FolderRules.Select(x => x.Pattern).ToList();
-        Exclude.Files = Exclude.FileRules.Select(x => x.Pattern).ToList();
 
         VisibilityRules = globalVisibility.Where(x => x.IsGlobal).Select(CloneVisibilityRule)
             .Concat(host.VisibilityRules.Where(x => !x.IsGlobal).Select(CloneVisibilityRule))
@@ -105,16 +101,12 @@ public sealed class AppConfig
             FolderRules = Exclude.FolderRules.Where(x => x.IsGlobal).Select(CloneTextRule).ToList(),
             FileRules = Exclude.FileRules.Where(x => x.IsGlobal).Select(CloneTextRule).ToList(),
         };
-        globalExclude.Folders = globalExclude.FolderRules.Select(x => x.Pattern).ToList();
-        globalExclude.Files = globalExclude.FileRules.Select(x => x.Pattern).ToList();
 
         var localExclude = new ExcludeConfig
         {
             FolderRules = Exclude.FolderRules.Where(x => !x.IsGlobal).Select(CloneTextRule).ToList(),
             FileRules = Exclude.FileRules.Where(x => !x.IsGlobal).Select(CloneTextRule).ToList(),
         };
-        localExclude.Folders = localExclude.FolderRules.Select(x => x.Pattern).ToList();
-        localExclude.Files = localExclude.FileRules.Select(x => x.Pattern).ToList();
 
         Hosts[CurrentHostKey] = new HostConfig
         {
@@ -185,16 +177,16 @@ public sealed class AppConfig
 
     private static void NormalizeRules(ExcludeConfig exclude, bool global)
     {
-        if (exclude.FolderRules.Count == 0 && exclude.Folders.Count > 0)
+        exclude.MigrateLegacyRules(global);
+    }
+
+    public void MigrateLegacySettings()
+    {
+        NormalizeRules(Exclude, global: true);
+        foreach (var host in Hosts.Values)
         {
-            exclude.FolderRules = exclude.Folders.Select(x => new ScopedTextRule { Pattern = x, IsGlobal = global }).ToList();
+            NormalizeRules(host.Exclude, global: false);
         }
-        if (exclude.FileRules.Count == 0 && exclude.Files.Count > 0)
-        {
-            exclude.FileRules = exclude.Files.Select(x => new ScopedTextRule { Pattern = x, IsGlobal = global }).ToList();
-        }
-        exclude.Folders = exclude.FolderRules.Select(x => x.Pattern).ToList();
-        exclude.Files = exclude.FileRules.Select(x => x.Pattern).ToList();
     }
 
     private static PathMapping ClonePathMapping(PathMapping mapping) => new() { ShareRoot = mapping.ShareRoot, MappedRoot = mapping.MappedRoot };
@@ -203,8 +195,6 @@ public sealed class AppConfig
     private static PinnedTabConfig ClonePinnedTab(PinnedTabConfig tab) => new() { Title = tab.Title, Query = tab.Query, ViewKey = tab.ViewKey, SortValue = tab.SortValue, TypeIndex = tab.TypeIndex, TypeNames = tab.TypeNames.ToList() };
     private static ExcludeConfig CloneExclude(ExcludeConfig exclude) => new()
     {
-        Folders = exclude.Folders.ToList(),
-        Files = exclude.Files.ToList(),
         FolderRules = exclude.FolderRules.Select(CloneTextRule).ToList(),
         FileRules = exclude.FileRules.Select(CloneTextRule).ToList(),
     };
@@ -212,15 +202,20 @@ public sealed class AppConfig
     {
         ShowInTaskbar = behavior.ShowInTaskbar,
         MinimizeToTray = behavior.MinimizeToTray,
+        ExitToTray = behavior.ExitToTray,
         ClearResultsWithQuery = behavior.ClearResultsWithQuery,
         GlobalHotkey = behavior.GlobalHotkey,
         Theme = behavior.Theme,
         HighlightMatches = behavior.HighlightMatches,
+        ShowQsirchInternalPaths = behavior.ShowQsirchInternalPaths,
+        ExactMatch = behavior.ExactMatch,
         UseQsirchThumbnails = behavior.UseQsirchThumbnails,
         SearchContents = behavior.SearchContents,
         PreviewPane = behavior.PreviewPane,
         AllowDownload = behavior.AllowDownload,
         FoldersFirst = behavior.FoldersFirst,
+        ShowMatchingParentFolders = behavior.ShowMatchingParentFolders,
+        CollapseMatchingFolderResults = behavior.CollapseMatchingFolderResults,
         ResultView = behavior.ResultView,
         ResultSort = behavior.ResultSort,
         VisibleDetailColumns = behavior.VisibleDetailColumns.ToList(),
@@ -228,14 +223,10 @@ public sealed class AppConfig
         FirstPageSize = behavior.FirstPageSize,
         NextPageSize = behavior.NextPageSize,
         MaxSearchResults = behavior.MaxSearchResults,
-        RefreshCacheOnStartup = behavior.RefreshCacheOnStartup,
     };
     private static HistoryConfig CloneHistory(HistoryConfig history) => new()
     {
         Enabled = history.Enabled,
-        File = history.File,
-        MaxEntries = history.MaxEntries,
-        SourceFilter = history.SourceFilter,
     };
 
     private sealed record ConnectionDefaults(string Host, int Port, bool Ssl, bool SslVerify, string User, string Password);
@@ -271,7 +262,7 @@ public sealed class HostConfig
     public HistoryConfig History { get; set; } = new();
 
     [JsonPropertyName("exclude")]
-    public ExcludeConfig Exclude { get; set; } = new() { Folders = [], Files = [] };
+    public ExcludeConfig Exclude { get; set; } = new();
 
     [JsonPropertyName("visibility_rules")]
     public List<VisibilityRule> VisibilityRules { get; set; } = [];
@@ -321,6 +312,9 @@ public sealed class BehaviorConfig
     [JsonPropertyName("minimize_to_tray")]
     public bool MinimizeToTray { get; set; }
 
+    [JsonPropertyName("exit_to_tray")]
+    public bool ExitToTray { get; set; }
+
     [JsonPropertyName("clear_results_with_query")]
     public bool ClearResultsWithQuery { get; set; }
 
@@ -332,6 +326,12 @@ public sealed class BehaviorConfig
 
     [JsonPropertyName("highlight_matches")]
     public bool HighlightMatches { get; set; } = true;
+
+    [JsonPropertyName("show_qsirch_internal_paths")]
+    public bool ShowQsirchInternalPaths { get; set; }
+
+    [JsonPropertyName("exact_match")]
+    public bool ExactMatch { get; set; }
 
     [JsonPropertyName("use_qsirch_thumbnails")]
     public bool UseQsirchThumbnails { get; set; }
@@ -348,6 +348,12 @@ public sealed class BehaviorConfig
     [JsonPropertyName("folders_first")]
     public bool FoldersFirst { get; set; } = true;
 
+    [JsonPropertyName("show_matching_parent_folders")]
+    public bool ShowMatchingParentFolders { get; set; } = true;
+
+    [JsonPropertyName("collapse_matching_folder_results")]
+    public bool CollapseMatchingFolderResults { get; set; }
+
     [JsonPropertyName("result_view")]
     public string ResultView { get; set; } = "details";
 
@@ -355,7 +361,7 @@ public sealed class BehaviorConfig
     public string ResultSort { get; set; } = "recent";
 
     [JsonPropertyName("visible_detail_columns")]
-    public List<string> VisibleDetailColumns { get; set; } = ["location", "name", "modified", "size", "type"];
+    public List<string> VisibleDetailColumns { get; set; } = ["name", "location", "modified", "type", "size"];
 
     [JsonPropertyName("search_timeout_seconds")]
     public int SearchTimeoutSeconds { get; set; } = 90;
@@ -369,8 +375,6 @@ public sealed class BehaviorConfig
     [JsonPropertyName("max_search_results")]
     public int MaxSearchResults { get; set; } = 500;
 
-    [JsonPropertyName("refresh_cache_on_startup")]
-    public bool RefreshCacheOnStartup { get; set; }
 }
 
 public sealed class HistoryConfig
@@ -378,20 +382,11 @@ public sealed class HistoryConfig
     [JsonPropertyName("enabled")]
     public bool Enabled { get; set; } = true;
 
-    [JsonPropertyName("file")]
-    public string File { get; set; } = "data\\history.json";
-
-    [JsonPropertyName("max_entries")]
-    public int MaxEntries { get; set; } = 20000;
-
-    [JsonPropertyName("source_filter")]
-    public string SourceFilter { get; set; } = "__this__";
 }
 
 public sealed class ExcludeConfig
 {
-    [JsonPropertyName("folders")]
-    public List<string> Folders { get; set; } =
+    private static readonly string[] DefaultFolderPatterns =
     [
         "@Recently-Snapshot\\*",
         "@Recycle\\*",
@@ -401,8 +396,7 @@ public sealed class ExcludeConfig
         ".qsync_sn\\*",
     ];
 
-    [JsonPropertyName("files")]
-    public List<string> Files { get; set; } =
+    private static readonly string[] DefaultFilePatterns =
     [
         "Thumbs.db",
         "desktop.ini",
@@ -416,11 +410,61 @@ public sealed class ExcludeConfig
         "*conflicted copy*",
     ];
 
+    private List<string>? _legacyFolders;
+    private List<string>? _legacyFiles;
+    private List<ScopedTextRule>? _folderRules;
+    private List<ScopedTextRule>? _fileRules;
+
+    [JsonPropertyName("folders")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? LegacyFolders
+    {
+        get => _legacyFolders;
+        set => _legacyFolders = value;
+    }
+
+    [JsonPropertyName("files")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? LegacyFiles
+    {
+        get => _legacyFiles;
+        set => _legacyFiles = value;
+    }
+
     [JsonPropertyName("folder_rules")]
-    public List<ScopedTextRule> FolderRules { get; set; } = [];
+    public List<ScopedTextRule> FolderRules
+    {
+        get => _folderRules ??= [];
+        set => _folderRules = value ?? [];
+    }
 
     [JsonPropertyName("file_rules")]
-    public List<ScopedTextRule> FileRules { get; set; } = [];
+    public List<ScopedTextRule> FileRules
+    {
+        get => _fileRules ??= [];
+        set => _fileRules = value ?? [];
+    }
+
+    public void MigrateLegacyRules(bool global)
+    {
+        if (_folderRules == null)
+        {
+            IEnumerable<string> folderPatterns = _legacyFolders is { Count: > 0 } ? _legacyFolders : DefaultFolderPatterns;
+            FolderRules = folderPatterns
+                .Select(pattern => new ScopedTextRule { Pattern = pattern, IsGlobal = global })
+                .ToList();
+        }
+        if (_fileRules == null)
+        {
+            IEnumerable<string> filePatterns = _legacyFiles is { Count: > 0 } ? _legacyFiles : DefaultFilePatterns;
+            FileRules = filePatterns
+                .Select(pattern => new ScopedTextRule { Pattern = pattern, IsGlobal = global })
+                .ToList();
+        }
+
+        _legacyFolders = null;
+        _legacyFiles = null;
+    }
 }
 
 public sealed class ScopedTextRule
