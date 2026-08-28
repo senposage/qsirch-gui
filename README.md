@@ -2,7 +2,7 @@
 
 PyQsirchgui is a portable Windows desktop search application for QNAP Qsirch. It gives staff an Explorer-style way to search shared files, open them with their normal Windows applications, reveal them in File Explorer, and keep useful files and searches close at hand.
 
-> **Status:** v1.0.0 production release.
+> **Status:** v1.0.1 production release.
 
 ## Highlights
 

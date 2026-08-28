@@ -1,4 +1,4 @@
-PyQsirchgui v1.0.0
+PyQsirchgui v1.0.1
 Written by Robert J Crane
 
 PyQsirchgui is a portable Windows search window for QNAP Qsirch. It is designed to behave like a familiar Explorer search: search, open a file with its normal Windows application, or show it in File Explorer.

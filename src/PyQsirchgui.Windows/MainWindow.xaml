@@ -1461,7 +1461,7 @@
     </Grid>
 
     <TextBlock Grid.Row="6"
-               Text="v1.0.0  Written by Robert J Crane"
+               Text="v1.0.1  Written by Robert J Crane"
                Margin="14,0"
                VerticalAlignment="Center"
                Foreground="{DynamicResource AppMutedTextBrush}" />

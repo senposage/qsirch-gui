@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.1 - Reliability Update
+
+- Fixed Copy full path when another Windows application temporarily owns the clipboard. PyQsirchgui now retries automatically and shows a clear status message only if the clipboard remains unavailable.
+- Fixed Qsirch searches and optional thumbnail requests after a NAS login session expires. A 401 response now triggers one automatic sign-in and retry instead of leaving subsequent searches unauthorized.
+
 ## 1.0.0 - First Production Release
 
 ### Desktop experience

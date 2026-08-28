@@ -94,7 +94,7 @@
           <ColumnDefinition Width="*" />
           <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
-        <TextBlock Text="v1.0.0  Written by Robert J Crane"
+        <TextBlock Text="v1.0.1  Written by Robert J Crane"
                    Foreground="{DynamicResource AppMutedTextBrush}"
                    VerticalAlignment="Center" />
         <Button Grid.Column="1" Content="Close" IsCancel="True" Margin="18,0,0,0" />
