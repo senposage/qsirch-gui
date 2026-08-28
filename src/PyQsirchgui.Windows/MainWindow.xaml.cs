@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Runtime.CompilerServices;
 using System.Collections.Specialized;
 using System.Windows;
@@ -1668,9 +1669,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private void CopyPathClicked(object sender, RoutedEventArgs e)
+    private async void CopyPathClicked(object sender, RoutedEventArgs e)
     {
-        CopyPath(SelectedResult());
+        await CopyPathAsync(SelectedResult());
     }
 
     private async void OpenInNewTabClicked(object sender, RoutedEventArgs e)
@@ -1723,12 +1724,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private void CopyFavoritePathClicked(object sender, RoutedEventArgs e)
+    private async void CopyFavoritePathClicked(object sender, RoutedEventArgs e)
     {
-        CopyPath(SelectedFavoriteResult());
+        await CopyPathAsync(SelectedFavoriteResult());
     }
 
-    private void CopyPath(SearchResult? result)
+    private async Task CopyPathAsync(SearchResult? result)
     {
         if (result == null)
         {
@@ -1741,13 +1742,46 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             {
                 PersistResolvedWindowsPath(result);
             }
-            Clipboard.SetText(_mapper.Resolve(result));
-            StatusText = "Path copied";
+            var path = _mapper.Resolve(result);
+            if (await TrySetClipboardTextAsync(path))
+            {
+                StatusText = "Path copied";
+            }
+            else
+            {
+                StatusText = "Clipboard is busy. Try copying again.";
+            }
         }
         catch (Exception ex)
         {
             MessageBox.Show(this, ex.Message, "Copy path", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
+    }
+
+    private static async Task<bool> TrySetClipboardTextAsync(string text)
+    {
+        const int clipboardBusyHResult = unchecked((int)0x800401D0);
+        const int attempts = 8;
+
+        for (var attempt = 0; attempt < attempts; attempt++)
+        {
+            try
+            {
+                Clipboard.SetText(text);
+                return true;
+            }
+            catch (COMException ex) when (ex.HResult == clipboardBusyHResult && attempt < attempts - 1)
+            {
+                await Task.Delay(75);
+            }
+            catch (COMException ex) when (ex.HResult == clipboardBusyHResult)
+            {
+                AppLogger.Warn("app", "clipboard remained unavailable after retrying copy path");
+                return false;
+            }
+        }
+
+        return false;
     }
 
     private void FavoriteClicked(object sender, RoutedEventArgs e)
