@@ -997,29 +997,84 @@
           </StackPanel>
         </Border>
         <Border Grid.Row="1" Background="{DynamicResource AppSubtleBorderBrush}" />
-        <DockPanel Grid.Row="2" LastChildFill="True" Margin="10,10,10,9">
-          <Button Content="Search" DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Click="SearchClicked" />
-          <Button Content="Load more" DockPanel.Dock="Right" Style="{StaticResource CommandButton}" Click="LoadMoreClicked" ToolTip="Request another block of results" />
-          <Button Content="Stop" DockPanel.Dock="Right" Style="{StaticResource CommandButton}" Click="StopClicked" ToolTip="Stop this search" />
-          <Button Content="Clear" DockPanel.Dock="Right" Style="{StaticResource CommandButton}" Click="ClearClicked" ToolTip="Clear this tab" />
-          <ComboBox x:Name="ViewBox"
-                    DockPanel.Dock="Right"
-                    Width="112"
-                    ItemsSource="{Binding ViewModes}"
-                    ToolTip="Results view"
-                    SelectionChanged="ViewChanged" />
-          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-            <TextBlock Text="Arrange"
-                       Margin="10,0,5,0"
-                       VerticalAlignment="Center"
-                       Foreground="{DynamicResource AppMutedTextBrush}" />
-            <ComboBox x:Name="SortBox"
-                      Width="132"
-                      ItemsSource="{Binding SortModes}"
-                      ToolTip="Arrange results"
-                      SelectionChanged="SortChanged" />
-          </StackPanel>
-          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+        <Grid Grid.Row="2" Margin="10,10,10,9">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" MinWidth="220" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+          <Border x:Name="SearchBoxChrome"
+                  Grid.Column="0"
+                  MinWidth="220"
+                  BorderThickness="1"
+                  CornerRadius="4"
+                  Margin="0,0,8,0">
+              <Border.Style>
+                <Style TargetType="Border">
+                  <Setter Property="Background" Value="{DynamicResource AppSearchInputBrush}" />
+                  <Setter Property="BorderBrush" Value="{DynamicResource AppSearchInputBorderBrush}" />
+                  <Style.Triggers>
+                    <DataTrigger Binding="{Binding IsKeyboardFocusWithin, ElementName=SearchText}" Value="True">
+                      <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+                    </DataTrigger>
+                  </Style.Triggers>
+                </Style>
+              </Border.Style>
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="34" />
+                  <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="&#xE721;"
+                           FontFamily="Segoe MDL2 Assets"
+                           FontSize="14"
+                           Foreground="{DynamicResource AppMutedTextBrush}"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center" />
+                <TextBox x:Name="SearchText"
+                         Grid.Column="1"
+                         BorderThickness="0"
+                         Background="Transparent"
+                         Padding="0,6,8,6"
+                         Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}"
+                         KeyDown="SearchKeyDown" />
+              </Grid>
+            </Border>
+          <ToggleButton x:Name="RecentSearchButton"
+                        Grid.Column="1"
+                        Width="34"
+                        Content="&#xE823;"
+                        Style="{StaticResource CommandIconToggle}"
+                        ToolTip="Recent searches" />
+          <CheckBox x:Name="ExactMatchToggle"
+                    Grid.Column="2"
+                    Content="Exact match"
+                    Margin="4,0,8,0"
+                    Checked="ExactMatchChanged"
+                    Unchecked="ExactMatchChanged"
+                    ToolTip="Match complete words in file names" />
+          <CheckBox x:Name="SearchContentsToggle"
+                    Grid.Column="3"
+                    Content="Search contents"
+                    Margin="0,0,8,0"
+                    Checked="SearchContentsChanged"
+                    Unchecked="SearchContentsChanged" />
+          <ToggleButton x:Name="TypeFilterButton"
+                        Grid.Column="4"
+                        Width="148"
+                        Content="{Binding TypeFilterSummary}"
+                        Style="{StaticResource FilterMenuToggle}"
+                        ToolTip="Filter by one or more file types" />
+          <StackPanel Grid.Column="5" Orientation="Horizontal">
             <TextBlock Text="Scope"
                        Margin="10,0,5,0"
                        VerticalAlignment="Center"
@@ -1030,12 +1085,29 @@
                       ToolTip="Select a folder result before using This folder"
                       SelectionChanged="ScopeChanged" />
           </StackPanel>
-          <ToggleButton x:Name="TypeFilterButton"
-                        DockPanel.Dock="Right"
-                        Width="148"
-                        Content="{Binding TypeFilterSummary}"
-                        Style="{StaticResource FilterMenuToggle}"
-                        ToolTip="Filter by one or more file types" />
+          <StackPanel Grid.Column="6" Orientation="Horizontal">
+            <TextBlock Text="Arrange"
+                       Margin="10,0,5,0"
+                       VerticalAlignment="Center"
+                       Foreground="{DynamicResource AppMutedTextBrush}" />
+            <ComboBox x:Name="SortBox"
+                      Width="132"
+                      ItemsSource="{Binding SortModes}"
+                      ToolTip="Arrange results"
+                      SelectionChanged="SortChanged" />
+          </StackPanel>
+          <ComboBox x:Name="ViewBox"
+                    Grid.Column="7"
+                    Width="112"
+                    Margin="10,0,0,0"
+                    ItemsSource="{Binding ViewModes}"
+                    ToolTip="Results view"
+                    SelectionChanged="ViewChanged" />
+          <Button Grid.Column="8" Content="Clear" Style="{StaticResource CommandButton}" Click="ClearClicked" ToolTip="Clear this tab" />
+          <Button Grid.Column="9" Content="Stop" Style="{StaticResource CommandButton}" Click="StopClicked" ToolTip="Stop this search" />
+          <Button Grid.Column="10" Content="Load more" Style="{StaticResource CommandButton}" Click="LoadMoreClicked" ToolTip="Request another block of results" />
+          <Button Grid.Column="11" Content="Search" Style="{StaticResource PrimaryButton}" Click="SearchClicked" />
+
           <Popup Placement="Bottom"
                  PlacementTarget="{Binding ElementName=TypeFilterButton}"
                  IsOpen="{Binding IsChecked, ElementName=TypeFilterButton, Mode=TwoWay}"
@@ -1072,12 +1144,6 @@
               </DockPanel>
             </Border>
           </Popup>
-          <ToggleButton x:Name="RecentSearchButton"
-                        DockPanel.Dock="Right"
-                        Width="34"
-                        Content="&#xE823;"
-                        Style="{StaticResource CommandIconToggle}"
-                        ToolTip="Recent searches" />
           <Popup Placement="Bottom"
                  PlacementTarget="{Binding ElementName=RecentSearchButton}"
                  IsOpen="{Binding IsChecked, ElementName=RecentSearchButton, Mode=TwoWay}"
@@ -1102,55 +1168,7 @@
               </ListBox>
             </Border>
           </Popup>
-          <CheckBox x:Name="SearchContentsToggle"
-                    Content="Search contents"
-                    DockPanel.Dock="Right"
-                    Checked="SearchContentsChanged"
-                    Unchecked="SearchContentsChanged" />
-          <CheckBox x:Name="ExactMatchToggle"
-                    Content="Exact match"
-                    DockPanel.Dock="Right"
-                    Margin="0,0,10,0"
-                    Checked="ExactMatchChanged"
-                    Unchecked="ExactMatchChanged"
-                    ToolTip="Match complete words in file names" />
-          <Border x:Name="SearchBoxChrome"
-                  MinWidth="280"
-                  BorderThickness="1"
-                  CornerRadius="4"
-                  Margin="0,0,8,0">
-            <Border.Style>
-              <Style TargetType="Border">
-                <Setter Property="Background" Value="{DynamicResource AppSearchInputBrush}" />
-                <Setter Property="BorderBrush" Value="{DynamicResource AppSearchInputBorderBrush}" />
-                <Style.Triggers>
-                  <DataTrigger Binding="{Binding IsKeyboardFocusWithin, ElementName=SearchText}" Value="True">
-                    <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
-                  </DataTrigger>
-                </Style.Triggers>
-              </Style>
-            </Border.Style>
-            <Grid>
-              <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="34" />
-                <ColumnDefinition Width="*" />
-              </Grid.ColumnDefinitions>
-              <TextBlock Text="&#xE721;"
-                         FontFamily="Segoe MDL2 Assets"
-                         FontSize="14"
-                         Foreground="{DynamicResource AppMutedTextBrush}"
-                         HorizontalAlignment="Center"
-                         VerticalAlignment="Center" />
-              <TextBox x:Name="SearchText"
-                       Grid.Column="1"
-                       BorderThickness="0"
-                       Background="Transparent"
-                       Padding="0,6,8,6"
-                       Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}"
-                       KeyDown="SearchKeyDown" />
-            </Grid>
-          </Border>
-        </DockPanel>
+        </Grid>
       </Grid>
     </Border>
 
