@@ -3,9 +3,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         Title="PyQsirchgui"
-        Width="1500"
+        Width="1200"
         Height="720"
-        MinWidth="1500"
+        MinWidth="1000"
         MinHeight="620"
         Icon="Assets/app.ico"
         WindowStyle="None"
@@ -881,7 +881,7 @@
       <RowDefinition Height="42" />
       <RowDefinition Height="42" />
       <RowDefinition Height="40" />
-      <RowDefinition Height="64" />
+      <RowDefinition Height="Auto" />
       <RowDefinition Height="28" />
       <RowDefinition Height="*" />
       <RowDefinition Height="24" />
@@ -953,7 +953,7 @@
         <Grid.RowDefinitions>
           <RowDefinition Height="40" />
           <RowDefinition Height="1" />
-          <RowDefinition Height="*" />
+          <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
         <Border Grid.Row="0" Background="{DynamicResource AppPanelBrush}" CornerRadius="6,6,0,0">
           <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0">
@@ -999,18 +999,8 @@
         <Border Grid.Row="1" Background="{DynamicResource AppSubtleBorderBrush}" />
         <Grid Grid.Row="2" Margin="10,10,10,9">
           <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="*" MinWidth="220" />
-            <ColumnDefinition Width="Auto" />
-            <ColumnDefinition Width="Auto" />
-            <ColumnDefinition Width="Auto" />
-            <ColumnDefinition Width="Auto" />
-            <ColumnDefinition Width="Auto" />
-            <ColumnDefinition Width="Auto" />
-            <ColumnDefinition Width="Auto" />
-            <ColumnDefinition Width="Auto" />
-            <ColumnDefinition Width="Auto" />
-            <ColumnDefinition Width="Auto" />
-            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="45*" MinWidth="220" />
+            <ColumnDefinition Width="55*" />
           </Grid.ColumnDefinitions>
           <Border x:Name="SearchBoxChrome"
                   Grid.Column="0"
@@ -1049,64 +1039,61 @@
                          KeyDown="SearchKeyDown" />
               </Grid>
             </Border>
-          <ToggleButton x:Name="RecentSearchButton"
-                        Grid.Column="1"
-                        Width="34"
-                        Content="&#xE823;"
-                        Style="{StaticResource CommandIconToggle}"
-                        ToolTip="Recent searches" />
-          <CheckBox x:Name="ExactMatchToggle"
-                    Grid.Column="2"
-                    Content="Exact match"
-                    Margin="4,0,8,0"
-                    Checked="ExactMatchChanged"
-                    Unchecked="ExactMatchChanged"
-                    ToolTip="Match complete words in file names" />
-          <CheckBox x:Name="SearchContentsToggle"
-                    Grid.Column="3"
-                    Content="Search contents"
-                    Margin="0,0,8,0"
-                    Checked="SearchContentsChanged"
-                    Unchecked="SearchContentsChanged" />
-          <ToggleButton x:Name="TypeFilterButton"
-                        Grid.Column="4"
-                        Width="148"
-                        Content="{Binding TypeFilterSummary}"
-                        Style="{StaticResource FilterMenuToggle}"
-                        ToolTip="Filter by one or more file types" />
-          <StackPanel Grid.Column="5" Orientation="Horizontal">
-            <TextBlock Text="Scope"
-                       Margin="10,0,5,0"
-                       VerticalAlignment="Center"
-                       Foreground="{DynamicResource AppMutedTextBrush}" />
-            <ComboBox x:Name="ScopeBox"
-                      Width="136"
-                      ItemsSource="{Binding SearchScopes}"
-                      ToolTip="Select a folder result before using This folder"
-                      SelectionChanged="ScopeChanged" />
-          </StackPanel>
-          <StackPanel Grid.Column="6" Orientation="Horizontal">
-            <TextBlock Text="Arrange"
-                       Margin="10,0,5,0"
-                       VerticalAlignment="Center"
-                       Foreground="{DynamicResource AppMutedTextBrush}" />
-            <ComboBox x:Name="SortBox"
-                      Width="132"
-                      ItemsSource="{Binding SortModes}"
-                      ToolTip="Arrange results"
-                      SelectionChanged="SortChanged" />
-          </StackPanel>
-          <ComboBox x:Name="ViewBox"
-                    Grid.Column="7"
-                    Width="112"
-                    Margin="10,0,0,0"
-                    ItemsSource="{Binding ViewModes}"
-                    ToolTip="Results view"
-                    SelectionChanged="ViewChanged" />
-          <Button Grid.Column="8" Content="Clear" Style="{StaticResource CommandButton}" Click="ClearClicked" ToolTip="Clear this tab" />
-          <Button Grid.Column="9" Content="Stop" Style="{StaticResource CommandButton}" Click="StopClicked" ToolTip="Stop this search" />
-          <Button Grid.Column="10" Content="Load more" Style="{StaticResource CommandButton}" Click="LoadMoreClicked" ToolTip="Request another block of results" />
-          <Button Grid.Column="11" Content="Search" Style="{StaticResource PrimaryButton}" Click="SearchClicked" />
+          <WrapPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top">
+            <ToggleButton x:Name="RecentSearchButton"
+                          Width="34"
+                          Content="&#xE823;"
+                          Style="{StaticResource CommandIconToggle}"
+                          ToolTip="Recent searches" />
+            <CheckBox x:Name="ExactMatchToggle"
+                      Content="Exact match"
+                      Margin="4,0,8,0"
+                      Checked="ExactMatchChanged"
+                      Unchecked="ExactMatchChanged"
+                      ToolTip="Match complete words in file names" />
+            <CheckBox x:Name="SearchContentsToggle"
+                      Content="Search contents"
+                      Margin="0,0,8,0"
+                      Checked="SearchContentsChanged"
+                      Unchecked="SearchContentsChanged" />
+            <ToggleButton x:Name="TypeFilterButton"
+                          Width="148"
+                          Content="{Binding TypeFilterSummary}"
+                          Style="{StaticResource FilterMenuToggle}"
+                          ToolTip="Filter by one or more file types" />
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="Scope"
+                         Margin="10,0,5,0"
+                         VerticalAlignment="Center"
+                         Foreground="{DynamicResource AppMutedTextBrush}" />
+              <ComboBox x:Name="ScopeBox"
+                        Width="136"
+                        ItemsSource="{Binding SearchScopes}"
+                        ToolTip="Select a folder result before using This folder"
+                        SelectionChanged="ScopeChanged" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="Arrange"
+                         Margin="10,0,5,0"
+                         VerticalAlignment="Center"
+                         Foreground="{DynamicResource AppMutedTextBrush}" />
+              <ComboBox x:Name="SortBox"
+                        Width="132"
+                        ItemsSource="{Binding SortModes}"
+                        ToolTip="Arrange results"
+                        SelectionChanged="SortChanged" />
+            </StackPanel>
+            <ComboBox x:Name="ViewBox"
+                      Width="112"
+                      Margin="10,0,0,0"
+                      ItemsSource="{Binding ViewModes}"
+                      ToolTip="Results view"
+                      SelectionChanged="ViewChanged" />
+            <Button Content="Clear" Style="{StaticResource CommandButton}" Click="ClearClicked" ToolTip="Clear this tab" />
+            <Button Content="Stop" Style="{StaticResource CommandButton}" Click="StopClicked" ToolTip="Stop this search" />
+            <Button Content="Load more" Style="{StaticResource CommandButton}" Click="LoadMoreClicked" ToolTip="Request another block of results" />
+            <Button Content="Search" Style="{StaticResource PrimaryButton}" Click="SearchClicked" />
+          </WrapPanel>
 
           <Popup Placement="Bottom"
                  PlacementTarget="{Binding ElementName=TypeFilterButton}"
