@@ -1005,6 +1005,8 @@
           <Border x:Name="SearchBoxChrome"
                   Grid.Column="0"
                   MinWidth="220"
+                  Height="36"
+                  VerticalAlignment="Top"
                   BorderThickness="1"
                   CornerRadius="4"
                   Margin="0,0,8,0">
