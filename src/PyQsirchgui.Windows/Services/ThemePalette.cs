@@ -18,9 +18,9 @@ public static class ThemePalette
             SetBrush(resources, "AppSubtleBorderBrush", "#333333");
             SetBrush(resources, "AppTextBrush", "#F3F3F3");
             SetBrush(resources, "AppMutedTextBrush", "#B8B8B8");
-            SetBrush(resources, "AppAccentBrush", "#4CC2FF");
-            SetBrush(resources, "AppAccentSoftBrush", "#19384B");
-            SetBrush(resources, "AppSelectionBrush", "#0E639C");
+            SetBrush(resources, "AppAccentBrush", "#72D39A");
+            SetBrush(resources, "AppAccentSoftBrush", "#18382A");
+            SetBrush(resources, "AppSelectionBrush", "#2B5140");
             SetBrush(resources, "AppSelectionTextBrush", "#FFFFFF");
             SetBrush(resources, "AppDisabledBrush", "#303030");
             SetBrush(resources, "AppDisabledTextBrush", "#D4D4D4");
@@ -32,9 +32,9 @@ public static class ThemePalette
             SetBrush(resources, SystemColors.WindowTextBrushKey, "#F3F3F3");
             SetBrush(resources, SystemColors.GrayTextBrushKey, "#B8B8B8");
             SetBrush(resources, SystemColors.ActiveBorderBrushKey, "#454545");
-            SetBrush(resources, SystemColors.HighlightBrushKey, "#0E639C");
+            SetBrush(resources, SystemColors.HighlightBrushKey, "#2B5140");
             SetBrush(resources, SystemColors.HighlightTextBrushKey, "#FFFFFF");
-            SetBrush(resources, SystemColors.InactiveSelectionHighlightBrushKey, "#3A3D41");
+            SetBrush(resources, SystemColors.InactiveSelectionHighlightBrushKey, "#35453E");
             SetBrush(resources, SystemColors.InactiveSelectionHighlightTextBrushKey, "#FFFFFF");
             return;
         }

@@ -9,6 +9,16 @@ namespace PyQsirchgui.Windows.Services;
 
 public static class ShellPreviewService
 {
+    private static readonly HashSet<string> VideoExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "3gp", "3g2", "asf", "avi", "flv", "m2ts", "m4v", "mkv", "mov", "mp4", "mpeg", "mpg", "mts", "ts", "webm", "wmv",
+    };
+
+    public static bool IsVideoFile(string extension)
+    {
+        return VideoExtensions.Contains(extension.Trim().TrimStart('.'));
+    }
+
     public static byte[]? RenderPreview(string path, int size = 1600)
     {
         if (!File.Exists(path))

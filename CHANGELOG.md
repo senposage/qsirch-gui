@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.9 - Native Preview and Performance Update
+
+### Windows previews
+
+- Completed the native Windows preview host for registered shell preview handlers, including Microsoft Office and Adobe Acrobat where installed.
+- Previewed files now resolve to their mapped local Windows path before a handler is invoked; Qsirch is not used to fetch preview content.
+- Corrected the preview-handler frame contract and use out-of-process COM activation so Adobe PDF previews can render reliably instead of returning a generic handler error.
+- Added guards for incomplete Qsirch metadata so a malformed result cannot be sent to a Windows preview handler as a bare extension path.
+- Video files remain excluded from native preview handling to avoid expensive or unreliable playback behavior in the results window.
+
+### Faster, more reliable search
+
+- Added a portable SQLite local index that is queried before the NAS, with fresh Qsirch results merged back into the index.
+- Kept progressive search painting: a small recent-results request paints first, then the full query continues page by page until Qsirch returns no more results.
+- Hardened cached-result painting so cache or history errors do not stop the live NAS search.
+- Improved diagnostic logging for search, result streaming, cache failures, preview mapping, handler activation, and preview failures.
+- Fixed saved-result deserialization to accept the portable history file's existing capitalized JSON fields without flooding the log with false missing-filename warnings.
+
+### Portable deployment
+
+- Kept the application self-contained for Windows x64 deployment and retained the portable `config`, `data`, `logs`, and `resources` package layout.
+- Preserved host-specific settings, pinned tabs, local cache, and history behavior while retaining a shared NAS connection default.
+
 ## 0.8b - Technical Test Build
 
 ### Platform and architecture

@@ -17,7 +17,7 @@
     "show_in_taskbar": true,
     "minimize_to_tray": false,
     "clear_results_with_query": false,
-    "global_hotkey": "Ctrl+Space",
+    "global_hotkey": "Ctrl+S",
     "theme": "system",
     "highlight_matches": true,
     "use_qsirch_thumbnails": false,
@@ -29,7 +29,7 @@
     "result_view": "details",
     "result_sort": "recent:desc",
     "search_timeout_seconds": 90,
-    "first_page_size": 25,
+    "first_page_size": 15,
     "next_page_size": 100,
     "visible_detail_columns": [
       "location",

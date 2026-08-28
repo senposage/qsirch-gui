@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Collections.Specialized;
@@ -18,8 +19,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly AppConfig _config = ConfigStore.Load();
     private readonly BulkObservableCollection<SearchResult> _allResults = [];
     private readonly HistoryStore _history;
+    private readonly SearchIndexStore _searchIndex;
     private readonly PathMapper _mapper;
     private readonly ShellActions _shell;
+    private QsirchClient _qsirchClient;
     private TrayIconService? _trayIcon;
     private ResultRules _rules;
     private string _query = "";
@@ -31,6 +34,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private bool _isBusy;
     private bool _initializing = true;
     private bool _loadingTab;
+    private bool _clearButtonActive;
     private int _viewRefreshVersion;
     private double _iconGlyphSize = 54;
     private double _iconGlyphFontSize = 44;
@@ -40,6 +44,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private bool _sortDescending = true;
     private List<ResultSortKey> _sortKeys = [new("recent", true)];
     private CancellationTokenSource? _paintCts;
+    private CancellationTokenSource? _previewCts;
+    private ShellPreviewHost? _nativePreviewHost;
     private bool _favoritesVisible = true;
     private GridLength _favoritesWidth = new(190);
     private GridLength _previewWidth = new(320);
@@ -64,17 +70,22 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         StateChanged += (_, _) => UpdateCaptionButtons();
         StateChanged += MainWindowStateChanged;
         Closing += MainWindowClosing;
+        AppLogger.Info("app", "main window initializing");
+        _history = new HistoryStore(_config);
+        _searchIndex = new SearchIndexStore();
+        _mapper = new PathMapper(_config);
+        _shell = new ShellActions(_mapper);
+        _qsirchClient = new QsirchClient(_config);
+        _trayIcon = new TrayIconService(ShowFromTray, ExitApplication);
+        _rules = new ResultRules(_config);
         Closed += (_, _) =>
         {
+            _previewCts?.Cancel();
+            ClearNativePreview();
+            _qsirchClient.Dispose();
             _trayIcon?.Dispose();
             _trayIcon = null;
         };
-        AppLogger.Info("app", "main window initializing");
-        _history = new HistoryStore(_config);
-        _mapper = new PathMapper(_config);
-        _shell = new ShellActions(_mapper);
-        _trayIcon = new TrayIconService(ShowFromTray, ExitApplication);
-        _rules = new ResultRules(_config);
         RegisterDetailColumns();
         SetupDetailColumnMenu();
         SearchTabs.Add(new SearchTabState { Title = "Search 1", ViewKey = configuredViewOrDefault(), SortValue = configuredSortOrDefault() });
@@ -87,13 +98,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 ViewKey = pinned.ViewKey,
                 SortValue = pinned.SortValue,
                 TypeIndex = pinned.TypeIndex,
+                TypeNames = pinned.TypeNames.ToList(),
                 IsPinned = true,
                 SearchOnFirstFocus = !string.IsNullOrWhiteSpace(pinned.Query),
             });
         }
         _selectedSearchTab = SearchTabs[0];
+        TypeFilterOptions = new ObservableCollection<FileTypeFilterOption>(TypeFilters
+            .Skip(1)
+            .Select(filter => new FileTypeFilterOption { Filter = filter }));
         DataContext = this;
-        TypeBox.SelectedIndex = 0;
         var configuredView = configuredViewOrDefault();
         ViewBox.SelectedItem = ViewModes.FirstOrDefault(x => x.Key.Equals(configuredView, StringComparison.OrdinalIgnoreCase)) ?? ViewModes[^1];
         var configuredSort = configuredSortOrDefault();
@@ -183,6 +197,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _selectedSearchTab = value;
             OnPropertyChanged();
             LoadTabState(value);
+            QueueInitialResultIcons(value, value.VisibleResults, CancellationToken.None);
             if (value.SearchOnFirstFocus && !string.IsNullOrWhiteSpace(value.Query))
             {
                 value.SearchOnFirstFocus = false;
@@ -207,6 +222,23 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         new() { Name = "Archives", Extensions = ["zip", "7z", "rar", "tar", "gz"] },
         new() { Name = "Code", Extensions = ["py", "js", "ts", "html", "css", "sql", "ps1", "bat", "cmd"] },
     ];
+
+    public ObservableCollection<FileTypeFilterOption> TypeFilterOptions { get; private set; } = [];
+
+    public string TypeFilterSummary
+    {
+        get
+        {
+            var selected = TypeFilterOptions.Where(option => option.IsSelected).Select(option => option.Name).ToList();
+            return selected.Count switch
+            {
+                0 => "All types",
+                1 => selected[0],
+                2 => string.Join(" + ", selected),
+                _ => $"{selected[0]} + {selected.Count - 1}",
+            };
+        }
+    }
 
     public IReadOnlyList<ResultViewMode> ViewModes { get; } =
     [
@@ -248,7 +280,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     _selectedSearchTab.Title = $"Search {SearchTabs.IndexOf(_selectedSearchTab) + 1}";
                 }
             }
-            if (!_loadingTab && _config.Behavior.ClearResultsWithQuery && string.IsNullOrWhiteSpace(value))
+            if (!_loadingTab && !_clearButtonActive && _config.Behavior.ClearResultsWithQuery && string.IsNullOrWhiteSpace(value))
             {
                 ClearSearchResults(cancelActiveSearch: true);
             }
@@ -333,7 +365,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             Title = $"Search {SearchTabs.Count + 1}",
             ViewKey = (ViewBox.SelectedItem as ResultViewMode)?.Key ?? configuredViewOrDefault(),
             SortValue = SerializeSortKeys(),
-            TypeIndex = TypeBox.SelectedIndex,
+            TypeNames = SelectedTypeNames().ToList(),
         };
         SearchTabs.Add(tab);
         SelectedSearchTab = tab;
@@ -421,7 +453,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _selectedSearchTab.ResultLocationText = ResultLocationText;
         _selectedSearchTab.ViewKey = (ViewBox.SelectedItem as ResultViewMode)?.Key ?? configuredViewOrDefault();
         _selectedSearchTab.SortValue = SerializeSortKeys();
-        _selectedSearchTab.TypeIndex = TypeBox.SelectedIndex;
+        _selectedSearchTab.TypeNames = SelectedTypeNames().ToList();
         if (!string.IsNullOrWhiteSpace(Query))
         {
             _selectedSearchTab.Title = Query.Trim();
@@ -443,6 +475,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 ViewKey = tab.ViewKey,
                 SortValue = tab.SortValue,
                 TypeIndex = tab.TypeIndex,
+                TypeNames = tab.TypeNames.ToList(),
             })
             .ToList();
         ConfigStore.Save(_config);
@@ -459,7 +492,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             StatusText = string.IsNullOrWhiteSpace(tab.StatusText) ? "Ready" : tab.StatusText;
             CountText = tab.CountText;
             ResultLocationText = tab.ResultLocationText;
-            TypeBox.SelectedIndex = Math.Clamp(tab.TypeIndex, 0, Math.Max(0, TypeBox.Items.Count - 1));
+            ApplyTypeSelection(tab.TypeNames, tab.TypeIndex);
             ViewBox.SelectedItem = ViewModes.FirstOrDefault(x => x.Key.Equals(tab.ViewKey, StringComparison.OrdinalIgnoreCase)) ?? ViewModes[^1];
             ApplySortMode(string.IsNullOrWhiteSpace(tab.SortValue) ? configuredSortOrDefault() : tab.SortValue);
             SortBox.SelectedItem = SortModes.FirstOrDefault(x => x.Key.Equals(_sortKeys[0].Key, StringComparison.OrdinalIgnoreCase)) ?? SortModes[0];
@@ -496,14 +529,23 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void ClearClicked(object sender, RoutedEventArgs e)
     {
-        Query = "";
+        _clearButtonActive = true;
+        try
+        {
+            Query = "";
+        }
+        finally
+        {
+            _clearButtonActive = false;
+        }
+        ClearSearchResults(cancelActiveSearch: true, respectPinnedTab: false);
         SearchText.Focus();
     }
 
-    private void ClearSearchResults(bool cancelActiveSearch)
+    private void ClearSearchResults(bool cancelActiveSearch, bool respectPinnedTab = true)
     {
         var tab = _selectedSearchTab;
-        if (tab?.IsPinned == true)
+        if (respectPinnedTab && tab?.IsPinned == true)
         {
             return;
         }
@@ -548,6 +590,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         tab.CancelSearch("new search");
         tab.SearchCts = new CancellationTokenSource();
+        tab.IconLoadRequests = 0;
         var searchVersion = ++tab.SearchVersion;
         var searchToken = tab.SearchCts.Token;
         SetTabBusy(tab, true);
@@ -557,30 +600,46 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         NasStreamPaintState? streamState = null;
         try
         {
-            var cached = _history.CachedResults(query)
+            var cacheTimer = Stopwatch.StartNew();
+            var indexed = await Task.Run(() => _searchIndex.Search(query), searchToken);
+            var cached = (indexed.Count > 0 ? indexed : _history.CachedResults(query))
                 .Where(result => !_rules.IsHidden(result))
                 .ToList();
             var showedCached = false;
-            AppLogger.Info("search", $"version={searchVersion} globalCachedVisible={cached.Count} historyFilter=\"{_config.History.SourceFilter}\"");
+            AppLogger.Info("search", $"version={searchVersion} localIndex={indexed.Count} cachedVisible={cached.Count} elapsed={cacheTimer.ElapsedMilliseconds}ms historyFilter=\"{_config.History.SourceFilter}\"");
             if (cached.Count > 0)
             {
-                await ReplaceResultsAsync(tab, cached, searchToken, "Saved results");
+                try
+                {
+                    await ReplaceResultsAsync(tab, cached, searchToken, "Saved results");
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.Error("search", ex, $"version={searchVersion} cached results could not be painted; continuing with NAS search");
+                    SetTabStatus(tab, "Checking NAS...", "");
+                }
                 if (!IsCurrentSearch(tab, searchVersion))
                 {
                     return;
                 }
-                SetTabStatus(tab, "Saved results; checking NAS...", tab.CountText);
-                showedCached = true;
-                AppLogger.Info("search", $"version={searchVersion} painted cached results");
+                if (tab.VisibleResults.Count > 0)
+                {
+                    SetTabStatus(tab, "Saved results; checking NAS...", tab.CountText);
+                    showedCached = true;
+                    AppLogger.Info("search", $"version={searchVersion} painted cached results");
+                }
             }
 
-            using var client = new QsirchClient(_config);
             var typeFilter = SelectedTypeFilter();
             var nasStreamState = new NasStreamPaintState(await Task.Run(_history.StarredKeys, searchToken));
             streamState = nasStreamState;
             var results = await SearchNasWithSettlingRetryAsync(
                 tab,
-                client,
+                _qsirchClient,
                 serverQuery,
                 typeFilter,
                 showedCached,
@@ -599,7 +658,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
             var visible = await Task.Run(() => results.Where(result => !_rules.IsHidden(result)).ToList());
             AppLogger.Info("search", $"version={searchVersion} nasResults={results.Count} visibleAfterRules={visible.Count} hiddenByRules={results.Count - visible.Count}");
-            await Task.Run(() => _history.AddResults(results));
+            await Task.Run(() => CacheResults(results), searchToken);
             if (!IsCurrentSearch(tab, searchVersion))
             {
                 AppLogger.Info("search", $"version={searchVersion} stale after history save");
@@ -633,7 +692,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         catch (TimeoutException ex) when (streamState?.Started == true)
         {
             SetTabStatus(tab, "Timed out; showing partial results", tab.CountText);
-            await Task.Run(() => _history.AddResults(streamState.Received), searchToken);
+            await Task.Run(() => CacheResults(streamState.Received), searchToken);
             if (IsActiveTab(tab))
             {
                 SaveCurrentTabState();
@@ -673,6 +732,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var recentCutoff = DateTime.Today.AddDays(-30);
 
+        await ThrottleInactiveTabAsync(tab, token);
         SetTabStatus(tab, "Loading recent results...", tab.CountText);
         var recentPage = await client.SearchAsync(
             serverQuery,
@@ -690,6 +750,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return results;
         }
 
+        await ThrottleInactiveTabAsync(tab, token);
         SetTabStatus(tab, "Loading all results...", tab.CountText);
         var firstPage = await client.SearchAsync(serverQuery, typeFilter, firstPageLimit, 0, batchReceived, token);
         var firstAdded = AddUniqueResults(results, seen, firstPage);
@@ -728,6 +789,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 return results;
             }
 
+            await ThrottleInactiveTabAsync(tab, token);
             var before = results.Count;
             var page = await client.SearchAsync(serverQuery, typeFilter, nextPageLimit, offset, batchReceived, token);
             AddUniqueResults(results, seen, page);
@@ -748,6 +810,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return results;
     }
 
+    private async Task ThrottleInactiveTabAsync(SearchTabState tab, CancellationToken token)
+    {
+        if (!IsActiveTab(tab))
+        {
+            await Task.Delay(150, token);
+        }
+    }
+
     private static int AddUniqueResults(List<SearchResult> results, HashSet<string> seen, IEnumerable<SearchResult> page)
     {
         var added = 0;
@@ -760,6 +830,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
         }
         return added;
+    }
+
+    private void CacheResults(IEnumerable<SearchResult> results)
+    {
+        var snapshot = results.ToList();
+        _history.AddResults(snapshot);
+        _searchIndex.Upsert(snapshot);
     }
 
     private static List<SearchResult> RecentResults(IEnumerable<SearchResult> results, DateTime cutoff)
@@ -780,7 +857,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 return;
             }
 
-            using var client = new QsirchClient(_config);
             var typeFilter = TypeFilters[0];
             var pageSize = Math.Clamp(_config.Behavior.NextPageSize, 25, 500);
             var offset = 0;
@@ -790,7 +866,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             while (!_isBusy)
             {
-                var page = await client.SearchAsync(".", typeFilter, pageSize, offset, null, CancellationToken.None);
+                var page = await _qsirchClient.SearchAsync(".", typeFilter, pageSize, offset, null, CancellationToken.None);
                 var added = 0;
                 foreach (var result in page)
                 {
@@ -804,7 +880,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 AppLogger.Info("history", $"background cache page offset={offset} count={page.Count} added={added} pending={pending.Count}");
                 if (pending.Count >= 500)
                 {
-                    await Task.Run(() => _history.AddResults(pending.ToList()));
+                    await Task.Run(() => CacheResults(pending.ToList()));
                     pending.Clear();
                 }
                 if (page.Count == 0 || added == 0)
@@ -818,7 +894,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             if (pending.Count > 0)
             {
-                await Task.Run(() => _history.AddResults(pending));
+                await Task.Run(() => CacheResults(pending));
             }
             AppLogger.Info("history", $"background cache refresh finished offset={offset}");
         }
@@ -893,12 +969,28 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             CountText = ResultCountText(VisibleResults.Count);
             tab.CountText = CountText;
-            _ = LoadResultIconsAsync(visible, token);
+            QueueInitialResultIcons(tab, visible, token);
             AppLogger.Info("paint", $"stream batch version={searchVersion} batch={visible.Count} visible={VisibleResults.Count}");
         }, System.Windows.Threading.DispatcherPriority.Background);
     }
 
-    private async void TypeChanged(object sender, SelectionChangedEventArgs e)
+    private async void TypeFilterChanged(object sender, RoutedEventArgs e)
+    {
+        OnPropertyChanged(nameof(TypeFilterSummary));
+        await ApplyTypeFilterAsync();
+    }
+
+    private async void ClearTypeFiltersClicked(object sender, RoutedEventArgs e)
+    {
+        foreach (var option in TypeFilterOptions)
+        {
+            option.IsSelected = false;
+        }
+        OnPropertyChanged(nameof(TypeFilterSummary));
+        await ApplyTypeFilterAsync();
+    }
+
+    private async Task ApplyTypeFilterAsync()
     {
         if (_loadingTab || _initializing)
         {
@@ -1134,11 +1226,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void ResultSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         var result = SelectedResult();
+        if (result is { IconSource: null })
+        {
+            _ = LoadResultIconsAsync([result], CancellationToken.None);
+        }
         UpdateResultLocationBar(result);
         ShowPreviewSummary(result);
         if (_config.Behavior.PreviewPane)
         {
-            _ = LoadPreviewAsync(result);
+            RequestPreview(result);
         }
     }
 
@@ -1173,7 +1269,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ShowPreviewSummary(result);
         if (_config.Behavior.PreviewPane)
         {
-            _ = LoadPreviewAsync(result);
+            RequestPreview(result);
         }
     }
 
@@ -1323,7 +1419,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ConfigStore.Save(_config);
         if (_config.Behavior.PreviewPane)
         {
-            _ = LoadPreviewAsync(CurrentPreviewResult());
+            RequestPreview(CurrentPreviewResult());
         }
     }
 
@@ -1412,6 +1508,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         AppLogger.Info("app", "main window restored from tray");
     }
 
+    public void ActivateFromExternalLaunch() => ShowFromTray();
+
     private void ExitApplication()
     {
         if (!Dispatcher.CheckAccess())
@@ -1434,6 +1532,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
         ConfigStore.Save(_config);
+        RecreateQsirchClient();
         _rules = new ResultRules(_config);
         if (dialog.ClearHistoryRequested)
         {
@@ -1449,6 +1548,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ApplyBehavior();
         SearchContentsToggle.IsChecked = _config.Behavior.SearchContents;
         StatusText = "Settings saved";
+    }
+
+    private void RecreateQsirchClient()
+    {
+        var previous = _qsirchClient;
+        _qsirchClient = new QsirchClient(_config);
+        previous.Dispose();
     }
 
     private void OpenSelected()
@@ -1591,7 +1697,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 _allResults.AddRange(batch);
                 VisibleResults.AddRange(visibleBatch);
                 CountText = ResultCountText(VisibleResults.Count);
-                _ = LoadResultIconsAsync(batch.ToList(), paintToken);
+                QueueInitialResultIcons(tab, batch, paintToken);
                 await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
             }
         }
@@ -1623,7 +1729,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             {
                 VisibleResults.AddRange(batch);
                 CountText = ResultCountText(VisibleResults.Count);
-                _ = LoadResultIconsAsync(batch.ToList(), token);
+                QueueInitialResultIcons(tab, batch, token);
                 await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
             }
         }
@@ -1637,14 +1743,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async Task RefreshResultViewsAsync(string reason)
     {
-        DetailsList.Items.Refresh();
-        IconGrid.Items.Refresh();
-        ExplorerList.Items.Refresh();
         await Dispatcher.InvokeAsync(() =>
         {
-            DetailsList.InvalidateVisual();
-            IconGrid.InvalidateVisual();
-            ExplorerList.InvalidateVisual();
             AppLogger.Info("paint", $"refresh reason=\"{reason}\" details={DetailsList.Visibility} iconGrid={IconGrid.Visibility} list={ExplorerList.Visibility} visible={VisibleResults.Count}");
         }, System.Windows.Threading.DispatcherPriority.Loaded);
     }
@@ -1859,7 +1959,43 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private FileTypeFilter SelectedTypeFilter()
     {
-        return TypeBox.SelectedItem as FileTypeFilter ?? TypeFilters[0];
+        var selected = TypeFilterOptions.Where(option => option.IsSelected).Select(option => option.Filter).ToList();
+        if (selected.Count == 0)
+        {
+            return TypeFilters[0];
+        }
+
+        if (selected.Count == 1)
+        {
+            return selected[0];
+        }
+
+        return new FileTypeFilter
+        {
+            Name = TypeFilterSummary,
+            Extensions = selected.SelectMany(filter => filter.Extensions).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+        };
+    }
+
+    private IEnumerable<string> SelectedTypeNames() => TypeFilterOptions
+        .Where(option => option.IsSelected)
+        .Select(option => option.Name);
+
+    private void ApplyTypeSelection(IEnumerable<string>? typeNames, int legacyTypeIndex)
+    {
+        var selected = (typeNames ?? [])
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (selected.Count == 0 && legacyTypeIndex > 0 && legacyTypeIndex < TypeFilters.Count)
+        {
+            selected.Add(TypeFilters[legacyTypeIndex].Name);
+        }
+
+        foreach (var option in TypeFilterOptions)
+        {
+            option.IsSelected = selected.Contains(option.Name);
+        }
+        OnPropertyChanged(nameof(TypeFilterSummary));
     }
 
     private Task LoadResultIconsAsync(IReadOnlyList<SearchResult> results, CancellationToken token)
@@ -1897,6 +2033,31 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return Task.CompletedTask;
     }
 
+    private void QueueInitialResultIcons(SearchTabState tab, IEnumerable<SearchResult> results, CancellationToken token)
+    {
+        if (!IsActiveTab(tab))
+        {
+            return;
+        }
+
+        const int initialIconBudget = 64;
+        var remaining = initialIconBudget - tab.IconLoadRequests;
+        if (remaining <= 0)
+        {
+            return;
+        }
+
+        var pending = results
+            .Where(result => result.IconSource == null)
+            .Take(remaining)
+            .ToList();
+        tab.IconLoadRequests += pending.Count;
+        if (pending.Count > 0)
+        {
+            _ = LoadResultIconsAsync(pending, token);
+        }
+    }
+
     private async Task LoadResultIconAsync(SearchResult result, string key, CancellationToken token)
     {
         var enteredGate = false;
@@ -1909,8 +2070,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             {
                 try
                 {
-                    using var client = new QsirchClient(_config);
-                    var thumbnail = await client.ThumbnailAsync(result, token);
+                    var thumbnail = await _qsirchClient.ThumbnailAsync(result, token);
                     if (thumbnail is { Length: > 0 })
                     {
                         icon = BitmapFromBytes(thumbnail);
@@ -2085,6 +2245,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         PreviewTitle.Text = result.FileName;
         PreviewText = "Loading preview...";
         ShowPreviewText();
+        if (TryShowNativePreview(result))
+        {
+            return;
+        }
         var preview = await BuildPreviewAsync(result);
         if (CurrentPreviewResult() == result && _config.Behavior.PreviewPane)
         {
@@ -2092,9 +2256,41 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
+    private void RequestPreview(SearchResult? result)
+    {
+        _previewCts?.Cancel();
+        if (!_config.Behavior.PreviewPane || result == null)
+        {
+            return;
+        }
+
+        var cts = new CancellationTokenSource();
+        _previewCts = cts;
+        _ = LoadPreviewAfterSelectionSettlesAsync(result, cts.Token);
+    }
+
+    private async Task LoadPreviewAfterSelectionSettlesAsync(SearchResult result, CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(180, token);
+            if (!token.IsCancellationRequested && CurrentPreviewResult() == result)
+            {
+                await LoadPreviewAsync(result);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
     private async Task<PreviewContent> BuildPreviewAsync(SearchResult result)
     {
         var header = $"{result.FileName}\r\n{result.DisplayPath}\r\n{result.Kind} {result.SizeText}".Trim();
+        if (ShellPreviewService.IsVideoFile(result.Extension))
+        {
+            return PreviewContent.ForText($"{header}\r\n\r\nVideo preview is unavailable. Open the file to play it.");
+        }
         var shellPreview = await Task.Run(() => BuildShellPreview(result));
         if (shellPreview != null)
         {
@@ -2124,6 +2320,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void RenderPreview(PreviewContent preview)
     {
+        ClearNativePreview();
         if (preview.ImageBytes != null)
         {
             PreviewImage.Source = BitmapFromBytes(preview.ImageBytes);
@@ -2142,9 +2339,69 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void ShowPreviewText()
     {
+        ClearNativePreview();
         PreviewImage.Source = null;
         PreviewImageHost.Visibility = Visibility.Collapsed;
         PreviewTextBox.Visibility = Visibility.Visible;
+    }
+
+    private bool TryShowNativePreview(SearchResult result)
+    {
+        if (result.IsFolder || ShellPreviewService.IsVideoFile(result.Extension))
+        {
+            return false;
+        }
+
+        try
+        {
+            var mappedPath = _mapper.Resolve(result);
+            AppLogger.Info("preview", $"mapped preview path=\"{mappedPath}\" sourcePath=\"{result.Path}\" name=\"{result.Name}\" extension=\"{result.Extension}\"");
+            var host = ShellPreviewHost.TryCreate(mappedPath);
+            if (host == null)
+            {
+                return false;
+            }
+
+            ClearNativePreview();
+            host.PreviewFailed += NativePreviewFailed;
+            _nativePreviewHost = host;
+            NativePreviewHost.Content = host;
+            NativePreviewHost.Visibility = Visibility.Visible;
+            PreviewImage.Source = null;
+            PreviewImageHost.Visibility = Visibility.Collapsed;
+            PreviewTextBox.Visibility = Visibility.Collapsed;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error("preview", ex, $"native preview could not be created path=\"{result.DisplayPath}\"");
+            return false;
+        }
+    }
+
+    private void ClearNativePreview()
+    {
+        var host = _nativePreviewHost;
+        _nativePreviewHost = null;
+        if (host != null)
+        {
+            host.PreviewFailed -= NativePreviewFailed;
+        }
+        NativePreviewHost.Content = null;
+        NativePreviewHost.Visibility = Visibility.Collapsed;
+        host?.Dispose();
+    }
+
+    private void NativePreviewFailed(object? sender, PreviewFailureEventArgs args)
+    {
+        if (!ReferenceEquals(sender, _nativePreviewHost))
+        {
+            return;
+        }
+
+        ClearNativePreview();
+        PreviewText = args.Message;
+        ShowPreviewText();
     }
 
     private static BitmapImage BitmapFromBytes(byte[] bytes)
@@ -2316,7 +2573,9 @@ public sealed class SearchTabState : INotifyPropertyChanged
     public string ViewKey { get; set; } = "details";
     public string SortValue { get; set; } = "recent:desc";
     public int TypeIndex { get; set; }
+    public List<string> TypeNames { get; set; } = [];
     public bool SearchOnFirstFocus { get; set; }
+    public int IconLoadRequests { get; set; }
     public CancellationTokenSource? SearchCts { get; set; }
     public int SearchVersion { get; set; }
     public bool IsBusy { get; set; }

@@ -77,6 +77,33 @@
       <Setter Property="Foreground" Value="White" />
       <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
       <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Padding" Value="16,5" />
+    </Style>
+    <Style x:Key="CommandButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+      <Setter Property="MinHeight" Value="30" />
+      <Setter Property="Padding" Value="10,4" />
+      <Setter Property="Margin" Value="0,0,2,0" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Style.Triggers>
+        <Trigger Property="IsMouseOver" Value="True">
+          <Setter Property="Background" Value="{DynamicResource AppAccentSoftBrush}" />
+          <Setter Property="BorderBrush" Value="{DynamicResource AppSubtleBorderBrush}" />
+        </Trigger>
+      </Style.Triggers>
+    </Style>
+    <Style x:Key="CommandIconButton" TargetType="Button" BasedOn="{StaticResource CommandButton}">
+      <Setter Property="Width" Value="32" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
+      <Setter Property="FontSize" Value="15" />
+    </Style>
+    <Style x:Key="FavoriteCommandButton" TargetType="Button" BasedOn="{StaticResource CommandButton}">
+      <Setter Property="Width" Value="32" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="FontFamily" Value="Segoe UI Symbol" />
+      <Setter Property="FontSize" Value="17" />
     </Style>
     <Style x:Key="CaptionButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
       <Setter Property="Width" Value="46" />
@@ -148,13 +175,13 @@
     </Style>
     <Style x:Key="SearchTabItemStyle" TargetType="ListBoxItem">
       <Setter Property="MinWidth" Value="120" />
-      <Setter Property="MinHeight" Value="32" />
-      <Setter Property="Padding" Value="10,3" />
-      <Setter Property="Margin" Value="0,5,3,0" />
-      <Setter Property="Background" Value="{DynamicResource AppPanelBrush}" />
+      <Setter Property="MinHeight" Value="36" />
+      <Setter Property="Padding" Value="10,4" />
+      <Setter Property="Margin" Value="0,3,4,0" />
+      <Setter Property="Background" Value="Transparent" />
       <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
-      <Setter Property="BorderBrush" Value="{DynamicResource AppSubtleBorderBrush}" />
-      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0,0,0,2" />
       <Setter Property="VerticalContentAlignment" Value="Center" />
       <Setter Property="Template">
         <Setter.Value>
@@ -170,12 +197,12 @@
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="TabChrome" Property="Background" Value="{DynamicResource AppElevatedBrush}" />
+                <Setter TargetName="TabChrome" Property="Background" Value="{DynamicResource AppAccentSoftBrush}" />
               </Trigger>
               <Trigger Property="IsSelected" Value="True">
                 <Setter TargetName="TabChrome" Property="Background" Value="{DynamicResource AppSurfaceBrush}" />
                 <Setter TargetName="TabChrome" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
-                <Setter TargetName="TabChrome" Property="BorderThickness" Value="1,1,1,0" />
+                <Setter TargetName="TabChrome" Property="BorderThickness" Value="0,0,0,2" />
                 <Setter Property="FontWeight" Value="SemiBold" />
               </Trigger>
             </ControlTemplate.Triggers>
@@ -306,8 +333,54 @@
         </Setter.Value>
       </Setter>
     </Style>
+    <Style x:Key="FilterMenuToggle" TargetType="ToggleButton">
+      <Setter Property="MinHeight" Value="32" />
+      <Setter Property="Margin" Value="3,0" />
+      <Setter Property="Padding" Value="9,4" />
+      <Setter Property="Background" Value="{DynamicResource AppElevatedBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ToggleButton">
+            <Border x:Name="Chrome"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="4">
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="28" />
+                </Grid.ColumnDefinitions>
+                <ContentPresenter Margin="{TemplateBinding Padding}"
+                                  VerticalAlignment="Center"
+                                  HorizontalAlignment="Left" />
+                <Path Grid.Column="1"
+                      Data="M 0 0 L 4 4 L 8 0 Z"
+                      Fill="{DynamicResource AppTextBrush}"
+                      Width="8"
+                      Height="4"
+                      HorizontalAlignment="Center"
+                      VerticalAlignment="Center" />
+              </Grid>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource AppPanelBrush}" />
+              </Trigger>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource AppAccentSoftBrush}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
     <Style TargetType="TextBox">
-      <Setter Property="MinHeight" Value="34" />
+      <Setter Property="MinHeight" Value="36" />
       <Setter Property="Padding" Value="10,6" />
       <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}" />
       <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
@@ -330,25 +403,100 @@
       <Setter Property="Background" Value="{DynamicResource AppPanelBrush}" />
       <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
       <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+      <Setter Property="BorderThickness" Value="0,0,1,1" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="GridViewColumnHeader">
+            <Border x:Name="Chrome"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                RecognizesAccessKey="True" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource AppAccentSoftBrush}" />
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource AppSelectionBrush}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
     </Style>
     <Style TargetType="ListBoxItem">
       <Setter Property="Padding" Value="3" />
       <Setter Property="Margin" Value="1" />
       <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ListBoxItem">
+            <Border x:Name="Chrome"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                Content="{TemplateBinding Content}"
+                                ContentTemplate="{TemplateBinding ContentTemplate}"
+                                ContentTemplateSelector="{TemplateBinding ContentTemplateSelector}" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource AppAccentSoftBrush}" />
+              </Trigger>
+              <Trigger Property="IsSelected" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource AppSelectionBrush}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
       <Style.Triggers>
         <Trigger Property="IsSelected" Value="True">
-          <Setter Property="Background" Value="{DynamicResource AppSelectionBrush}" />
           <Setter Property="Foreground" Value="{DynamicResource AppSelectionTextBrush}" />
         </Trigger>
       </Style.Triggers>
     </Style>
     <Style TargetType="ListViewItem">
-      <Setter Property="MinHeight" Value="34" />
-      <Setter Property="Padding" Value="2" />
+      <Setter Property="MinHeight" Value="38" />
+      <Setter Property="Padding" Value="4,2" />
       <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ListViewItem">
+            <Border x:Name="Chrome"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    Padding="{TemplateBinding Padding}">
+              <GridViewRowPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                    VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                    Content="{TemplateBinding Content}"
+                                    Columns="{Binding Path=View.Columns, RelativeSource={RelativeSource AncestorType={x:Type ListView}}}" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource AppAccentSoftBrush}" />
+              </Trigger>
+              <Trigger Property="IsSelected" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource AppSelectionBrush}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
       <Style.Triggers>
         <Trigger Property="IsSelected" Value="True">
-          <Setter Property="Background" Value="{DynamicResource AppSelectionBrush}" />
           <Setter Property="Foreground" Value="{DynamicResource AppSelectionTextBrush}" />
         </Trigger>
       </Style.Triggers>
@@ -502,9 +650,9 @@
   <Grid>
     <Grid.RowDefinitions>
       <RowDefinition Height="42" />
-      <RowDefinition Height="52" />
       <RowDefinition Height="42" />
-      <RowDefinition Height="58" />
+      <RowDefinition Height="40" />
+      <RowDefinition Height="64" />
       <RowDefinition Height="28" />
       <RowDefinition Height="*" />
       <RowDefinition Height="24" />
@@ -540,13 +688,8 @@
       </DockPanel>
     </Border>
 
-    <Border Grid.Row="1"
-            Margin="8,5,8,5"
-            Padding="8,4"
-            Background="{DynamicResource AppPanelBrush}"
-            BorderBrush="{DynamicResource AppSubtleBorderBrush}"
-            BorderThickness="1"
-            CornerRadius="6">
+    <Grid Grid.Row="1"
+          Margin="12,3,12,3">
       <Grid>
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="Auto" />
@@ -555,31 +698,33 @@
         </Grid.ColumnDefinitions>
 
         <StackPanel Grid.Column="0" Orientation="Horizontal">
-          <Button Content="Open" Click="OpenClicked" />
-          <Button Content="Show" Click="ShowClicked" />
-          <Button x:Name="FavoritesToggle" Content="★ Favorites" Click="FavoritesToggleClicked" />
-          <Button x:Name="PreviewToggle" Content="Preview" Click="PreviewToggleClicked" />
+          <Button Content="Open" Style="{StaticResource CommandButton}" Click="OpenClicked" ToolTip="Open selected item" />
+          <Button Content="Show" Style="{StaticResource CommandButton}" Click="ShowClicked" ToolTip="Show selected item in File Explorer" />
+          <Border Width="1" Height="20" Margin="7,5" Background="{DynamicResource AppSubtleBorderBrush}" />
+          <Button x:Name="PreviewToggle" Content="Preview" Style="{StaticResource CommandButton}" Click="PreviewToggleClicked" ToolTip="Show preview pane" />
+          <Button x:Name="FavoritesToggle" Content="★" Style="{StaticResource FavoriteCommandButton}" Click="FavoritesToggleClicked" ToolTip="Show Favorites" />
         </StackPanel>
         <StackPanel Grid.Column="2" Orientation="Horizontal">
-          <Button Content="Settings" Click="SettingsClicked" />
+          <Button Content="&#xE713;" Style="{StaticResource CommandIconButton}" Click="SettingsClicked" ToolTip="Settings" />
         </StackPanel>
       </Grid>
-    </Border>
+    </Grid>
 
     <Border Grid.Row="2"
             Grid.RowSpan="2"
-            Margin="8,0,8,4"
+            Margin="12,0,12,5"
             Background="{DynamicResource AppSurfaceBrush}"
             BorderBrush="{DynamicResource AppSubtleBorderBrush}"
-            BorderThickness="1">
+            BorderThickness="1"
+            CornerRadius="6">
       <Grid>
         <Grid.RowDefinitions>
-          <RowDefinition Height="42" />
+          <RowDefinition Height="40" />
           <RowDefinition Height="1" />
           <RowDefinition Height="*" />
         </Grid.RowDefinitions>
-        <Border Grid.Row="0" Background="{DynamicResource AppPanelBrush}">
-          <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0">
+        <Border Grid.Row="0" Background="{DynamicResource AppPanelBrush}" CornerRadius="6,6,0,0">
+          <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0">
             <ListBox x:Name="SearchTabsControl"
                      ItemsSource="{Binding SearchTabs}"
                      SelectedItem="{Binding SelectedSearchTab, Mode=TwoWay}"
@@ -616,50 +761,109 @@
                 </DataTemplate>
               </ListBox.ItemTemplate>
             </ListBox>
-            <Button Content="&#xE710;" Style="{StaticResource TabChromeButton}" VerticalAlignment="Center" Click="NewTabClicked" ToolTip="New tab" />
+            <Button Content="&#xE710;" Style="{StaticResource TabChromeButton}" VerticalAlignment="Center" Click="NewTabClicked" ToolTip="New search tab" />
           </StackPanel>
         </Border>
-        <Border Grid.Row="1" Background="{DynamicResource AppBorderBrush}" />
-        <DockPanel Grid.Row="2" LastChildFill="True" Margin="6,5">
+        <Border Grid.Row="1" Background="{DynamicResource AppSubtleBorderBrush}" />
+        <DockPanel Grid.Row="2" LastChildFill="True" Margin="10,10,10,9">
           <Button Content="Search" DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Click="SearchClicked" />
-          <Button Content="Stop" DockPanel.Dock="Right" Click="StopClicked" />
-          <Button Content="Clear" DockPanel.Dock="Right" Click="ClearClicked" />
+          <Button Content="Stop" DockPanel.Dock="Right" Style="{StaticResource CommandButton}" Click="StopClicked" ToolTip="Stop this search" />
+          <Button Content="Clear" DockPanel.Dock="Right" Style="{StaticResource CommandButton}" Click="ClearClicked" ToolTip="Clear this tab" />
           <ComboBox x:Name="ViewBox"
                     DockPanel.Dock="Right"
-                    Width="118"
+                    Width="112"
                     ItemsSource="{Binding ViewModes}"
+                    ToolTip="Results view"
                     SelectionChanged="ViewChanged" />
           <ComboBox x:Name="SortBox"
                     DockPanel.Dock="Right"
-                    Width="136"
+                    Width="132"
                     ItemsSource="{Binding SortModes}"
                     ToolTip="{Binding SortSummaryText}"
                     SelectionChanged="SortChanged" />
-          <ComboBox x:Name="TypeBox"
-                    DockPanel.Dock="Right"
-                    Width="142"
-                    ItemsSource="{Binding TypeFilters}"
-                    SelectionChanged="TypeChanged" />
+          <ToggleButton x:Name="TypeFilterButton"
+                        DockPanel.Dock="Right"
+                        Width="148"
+                        Content="{Binding TypeFilterSummary}"
+                        Style="{StaticResource FilterMenuToggle}"
+                        ToolTip="Filter by one or more file types" />
+          <Popup Placement="Bottom"
+                 PlacementTarget="{Binding ElementName=TypeFilterButton}"
+                 IsOpen="{Binding IsChecked, ElementName=TypeFilterButton, Mode=TwoWay}"
+                 StaysOpen="False"
+                 AllowsTransparency="True"
+                 PopupAnimation="Fade">
+            <Border Width="238"
+                    Background="{DynamicResource AppElevatedBrush}"
+                    BorderBrush="{DynamicResource AppBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="4"
+                    Padding="5">
+              <DockPanel>
+                <Button Content="All types"
+                        DockPanel.Dock="Top"
+                        Style="{StaticResource CommandButton}"
+                        HorizontalAlignment="Stretch"
+                        Click="ClearTypeFiltersClicked"
+                        ToolTip="Clear file type selections" />
+                <Border DockPanel.Dock="Top" Height="1" Margin="3,3" Background="{DynamicResource AppSubtleBorderBrush}" />
+                <ScrollViewer MaxHeight="320">
+                  <ItemsControl ItemsSource="{Binding TypeFilterOptions}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <CheckBox Content="{Binding Name}"
+                                  IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                  Checked="TypeFilterChanged"
+                                  Unchecked="TypeFilterChanged"
+                                  Margin="5,3" />
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </ScrollViewer>
+              </DockPanel>
+            </Border>
+          </Popup>
           <CheckBox x:Name="SearchContentsToggle"
                     Content="Search contents"
                     DockPanel.Dock="Right"
                     Checked="SearchContentsChanged"
                     Unchecked="SearchContentsChanged" />
-          <TextBox x:Name="SearchText"
-                   Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}"
-                   KeyDown="SearchKeyDown" />
+          <Border Background="{DynamicResource AppElevatedBrush}"
+                  BorderBrush="{DynamicResource AppBorderBrush}"
+                  BorderThickness="1"
+                  CornerRadius="4"
+                  Margin="0,0,8,0">
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="34" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <TextBlock Text="&#xE721;"
+                         FontFamily="Segoe MDL2 Assets"
+                         FontSize="14"
+                         Foreground="{DynamicResource AppMutedTextBrush}"
+                         HorizontalAlignment="Center"
+                         VerticalAlignment="Center" />
+              <TextBox x:Name="SearchText"
+                       Grid.Column="1"
+                       BorderThickness="0"
+                       Padding="0,6,8,6"
+                       Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}"
+                       KeyDown="SearchKeyDown" />
+            </Grid>
+          </Border>
         </DockPanel>
       </Grid>
     </Border>
 
-    <Grid Grid.Row="4" Margin="10,0,10,0">
+    <Grid Grid.Row="4" Margin="14,0,14,0">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="*" />
         <ColumnDefinition Width="Auto" />
       </Grid.ColumnDefinitions>
-      <ProgressBar Width="140"
-                   Height="12"
+      <ProgressBar Width="96"
+                   Height="4"
                    IsIndeterminate="True"
                    Visibility="{Binding BusyVisibility}" />
       <TextBlock Grid.Column="1"
@@ -673,7 +877,7 @@
                  HorizontalAlignment="Right" />
     </Grid>
 
-    <Grid Grid.Row="5" Margin="8,4,8,4">
+    <Grid Grid.Row="5" Margin="12,4,12,8">
       <Grid.ColumnDefinitions>
         <ColumnDefinition x:Name="FavoritesColumn" Width="190" MinWidth="140" />
         <ColumnDefinition x:Name="FavoritesSplitterColumn" Width="5" />
@@ -682,12 +886,14 @@
         <ColumnDefinition x:Name="PreviewColumn" Width="320" MinWidth="220" />
       </Grid.ColumnDefinitions>
 
-      <Border x:Name="FavoritesPane" Grid.Column="0" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" Background="{DynamicResource AppPanelBrush}">
+      <Border x:Name="FavoritesPane" Grid.Column="0" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" Background="{DynamicResource AppSurfaceBrush}" CornerRadius="4">
         <DockPanel>
-          <DockPanel DockPanel.Dock="Top" Margin="8,5,8,3">
-            <Button Content="Hide" DockPanel.Dock="Right" MinHeight="24" Padding="8,1" Click="HideFavoritesClicked" />
-            <TextBlock Text="★ Favorites" FontWeight="SemiBold" VerticalAlignment="Center" />
-          </DockPanel>
+          <Border DockPanel.Dock="Top" Padding="9,7,7,6" Background="{DynamicResource AppPanelBrush}" BorderBrush="{DynamicResource AppSubtleBorderBrush}" BorderThickness="0,0,0,1" CornerRadius="4,4,0,0">
+            <DockPanel>
+              <Button Content="&#xE711;" DockPanel.Dock="Right" Style="{StaticResource CommandIconButton}" MinHeight="26" Click="HideFavoritesClicked" ToolTip="Hide Favorites" />
+              <TextBlock Text="★ Favorites" FontWeight="SemiBold" VerticalAlignment="Center" />
+            </DockPanel>
+          </Border>
           <ListBox x:Name="FavoritesList"
                    ItemsSource="{Binding FavoriteResults}"
                    ItemTemplate="{StaticResource FavoriteTemplate}"
@@ -712,7 +918,7 @@
                     HorizontalAlignment="Stretch"
                     Background="{DynamicResource AppWindowBrush}" />
 
-      <Grid Grid.Column="2" Margin="8,0">
+      <Grid Grid.Column="2" Margin="10,0">
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto" />
           <RowDefinition Height="*" />
@@ -720,10 +926,10 @@
         <Border x:Name="ResultLocationBar"
                 Grid.Row="0"
                 Margin="0,0,0,6"
-                Padding="9,5"
+                Padding="9,6"
                 Background="{DynamicResource AppPanelBrush}"
-                BorderBrush="{DynamicResource AppBorderBrush}"
-                BorderThickness="1"
+                BorderBrush="{DynamicResource AppSubtleBorderBrush}"
+                BorderThickness="0,0,0,1"
                 Visibility="{Binding ResultLocationVisibility}">
           <DockPanel LastChildFill="True">
             <TextBlock Text="Location"
@@ -743,6 +949,7 @@
                   PreviewMouseRightButtonDown="ResultRightButtonDown"
                   VirtualizingPanel.IsVirtualizing="True"
                   VirtualizingPanel.VirtualizationMode="Recycling"
+                  VirtualizingPanel.IsVirtualizingWhenGrouping="True"
                   ScrollViewer.CanContentScroll="True">
           <ListView.ContextMenu>
             <ContextMenu>
@@ -793,6 +1000,7 @@
                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                  VirtualizingPanel.IsVirtualizing="True"
                  VirtualizingPanel.VirtualizationMode="Recycling"
+                 VirtualizingPanel.IsVirtualizingWhenGrouping="True"
                  ScrollViewer.CanContentScroll="True">
           <ListBox.ContextMenu>
             <ContextMenu>
@@ -818,6 +1026,7 @@
                  ItemTemplate="{StaticResource ExplorerListTemplate}"
                  VirtualizingPanel.IsVirtualizing="True"
                  VirtualizingPanel.VirtualizationMode="Recycling"
+                 VirtualizingPanel.IsVirtualizingWhenGrouping="True"
                  ScrollViewer.CanContentScroll="True">
           <ListBox.ContextMenu>
             <ContextMenu>
@@ -835,12 +1044,14 @@
                     HorizontalAlignment="Stretch"
                     Background="{DynamicResource AppWindowBrush}" />
 
-      <Border x:Name="PreviewPane" Grid.Column="4" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" Background="{DynamicResource AppSurfaceBrush}">
+      <Border x:Name="PreviewPane" Grid.Column="4" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" Background="{DynamicResource AppSurfaceBrush}" CornerRadius="4">
         <DockPanel>
-          <DockPanel DockPanel.Dock="Top" Margin="8,5,8,3">
-            <Button Content="Hide" DockPanel.Dock="Right" MinHeight="24" Padding="8,1" Click="HidePreviewClicked" />
-            <TextBlock x:Name="PreviewTitle" Text="Preview" FontWeight="SemiBold" VerticalAlignment="Center" />
-          </DockPanel>
+          <Border DockPanel.Dock="Top" Padding="9,7,7,6" Background="{DynamicResource AppPanelBrush}" BorderBrush="{DynamicResource AppSubtleBorderBrush}" BorderThickness="0,0,0,1" CornerRadius="4,4,0,0">
+            <DockPanel>
+              <Button Content="&#xE711;" DockPanel.Dock="Right" Style="{StaticResource CommandIconButton}" MinHeight="26" Click="HidePreviewClicked" ToolTip="Hide preview" />
+              <TextBlock x:Name="PreviewTitle" Text="Preview" FontWeight="SemiBold" VerticalAlignment="Center" />
+            </DockPanel>
+          </Border>
           <TextBox x:Name="PreviewTextBox"
                    Text="{Binding PreviewText}"
                    IsReadOnly="True"
@@ -860,13 +1071,14 @@
                    HorizontalAlignment="Center"
                    VerticalAlignment="Center" />
           </Border>
+          <ContentControl x:Name="NativePreviewHost" Visibility="Collapsed" />
         </DockPanel>
       </Border>
     </Grid>
 
     <TextBlock Grid.Row="6"
-               Text="v0.8b  Written by Robert J Crane"
-               Margin="8,0"
+               Text="v0.9  Written by Robert J Crane"
+               Margin="14,0"
                VerticalAlignment="Center"
                Foreground="{DynamicResource AppMutedTextBrush}" />
   </Grid>

@@ -37,13 +37,23 @@ public sealed class SearchResult : INotifyPropertyChanged
     {
         get
         {
+            if (string.IsNullOrWhiteSpace(Name))
+            {
+                var fromPath = System.IO.Path.GetFileName(Path.TrimEnd('\\', '/'));
+                return !string.IsNullOrWhiteSpace(Extension) && fromPath.EndsWith("." + Extension, StringComparison.OrdinalIgnoreCase)
+                    ? fromPath
+                    : "";
+            }
             if (string.IsNullOrWhiteSpace(Extension) || Name.EndsWith("." + Extension, StringComparison.OrdinalIgnoreCase))
             {
-                return string.IsNullOrWhiteSpace(Name) ? Path : Name;
+                return Name;
             }
             return $"{Name}.{Extension}";
         }
     }
+
+    public bool HasUsableFileName => !string.IsNullOrWhiteSpace(FileName) &&
+                                     !FileName.Trim().Equals("." + Extension.Trim(), StringComparison.OrdinalIgnoreCase);
 
     public string DisplayPath
     {
@@ -170,6 +180,14 @@ public sealed class FileTypeFilter
     public string[] Extensions { get; init; } = [];
 
     public override string ToString() => Name;
+}
+
+public sealed class FileTypeFilterOption
+{
+    public required FileTypeFilter Filter { get; init; }
+    public bool IsSelected { get; set; }
+
+    public string Name => Filter.Name;
 }
 
 public sealed class ResultViewMode

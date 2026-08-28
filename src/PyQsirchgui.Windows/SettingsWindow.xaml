@@ -471,7 +471,7 @@
               <StackPanel Grid.Row="1" Grid.Column="1" Margin="0,0,0,14">
                 <TextBlock Text="Hide / unhide shortcut" Margin="0,0,0,4" />
                 <TextBox x:Name="HotkeyBox" Width="180" HorizontalAlignment="Left" />
-                <TextBlock Text="Example: Ctrl+Space, Alt+Q, Ctrl+Shift+F" Foreground="{DynamicResource AppMutedTextBrush}" TextWrapping="Wrap" Margin="0,5,0,0" />
+                <TextBlock Text="Example: Ctrl+S, Alt+Q, Ctrl+Shift+F" Foreground="{DynamicResource AppMutedTextBrush}" TextWrapping="Wrap" Margin="0,5,0,0" />
               </StackPanel>
               <StackPanel Grid.Row="2" Grid.Column="0" Margin="0,0,18,0">
                 <TextBlock Text="Qsirch timeout seconds" Margin="0,0,0,4" />
@@ -557,7 +557,10 @@
           <TabItem Header="Visibility">
             <DockPanel Margin="0,8,0,0">
               <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,8,0,0">
-                <Button Content="Add" Width="72" Click="AddVisibilityRuleClicked" />
+                <CheckBox x:Name="VisibilityThisMachineBox" Content="This machine" IsChecked="True" Margin="0,0,12,0" />
+                <CheckBox x:Name="VisibilityThisUserBox" Content="This user" Margin="0,0,12,0" />
+                <Button Content="Add deny" Width="82" Click="AddVisibilityRuleClicked" />
+                <Button Content="Add allow" Width="82" Click="AddVisibilityAllowClicked" />
                 <Button Content="Remove" Width="82" Click="RemoveVisibilityRuleClicked" />
               </StackPanel>
               <DataGrid x:Name="VisibilityRulesGrid"
@@ -565,7 +568,7 @@
                         CanUserAddRows="True"
                         CanUserDeleteRows="True">
                 <DataGrid.Columns>
-                  <DataGridCheckBoxColumn Header="Global"
+                  <DataGridCheckBoxColumn Header="All machines"
                                           Binding="{Binding IsGlobal, UpdateSourceTrigger=PropertyChanged}"
                                           Width="70" />
                   <DataGridComboBoxColumn Header="Access"

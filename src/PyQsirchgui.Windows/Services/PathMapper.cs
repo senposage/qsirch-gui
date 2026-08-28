@@ -7,10 +7,17 @@ namespace PyQsirchgui.Windows.Services;
 
 public sealed class PathMapper(AppConfig config)
 {
+    private static readonly object MappedDrivesGate = new();
+    private static IReadOnlyList<MappedDrive> _mappedDrives = [];
+    private static DateTime _mappedDrivesExpiresUtc = DateTime.MinValue;
     public string Resolve(SearchResult result)
     {
         var qpath = Normalize(result.Path);
-        var fileName = result.FileName;
+        var fileName = result.FileName.Trim();
+        if (!result.IsFolder && !result.HasUsableFileName)
+        {
+            throw new InvalidOperationException("Qsirch did not provide a file name for this result. Run the search again to refresh it from the NAS.");
+        }
         if (!string.IsNullOrWhiteSpace(fileName) && !qpath.EndsWith(fileName, StringComparison.OrdinalIgnoreCase))
         {
             qpath = qpath.TrimEnd('\\') + "\\" + fileName;
@@ -29,25 +36,9 @@ public sealed class PathMapper(AppConfig config)
                 continue;
             }
 
-            if (qpath.StartsWith(source, StringComparison.OrdinalIgnoreCase))
+            if (TryResolveMappedRoot(qpath, source, target, out var resolved))
             {
-                var rest = qpath[source.Length..].TrimStart('\\');
-                return string.IsNullOrWhiteSpace(rest) ? target : Path.Combine(target, rest);
-            }
-
-            var sourceParts = source.Split('\\', StringSplitOptions.RemoveEmptyEntries);
-            var shareName = sourceParts.Length > 0 ? sourceParts[^1] : "";
-            if (!string.IsNullOrWhiteSpace(shareName))
-            {
-                var relative = qpath.TrimStart('\\');
-                if (relative.Equals(shareName, StringComparison.OrdinalIgnoreCase))
-                {
-                    return target;
-                }
-                if (relative.StartsWith(shareName + "\\", StringComparison.OrdinalIgnoreCase))
-                {
-                    return Path.Combine(target, relative[(shareName.Length + 1)..]);
-                }
+                return resolved;
             }
         }
 
@@ -93,6 +84,59 @@ public sealed class PathMapper(AppConfig config)
         return null;
     }
 
+    private static bool TryResolveMappedRoot(string qpath, string source, string target, out string resolved)
+    {
+        foreach (var prefix in CandidateMappingPrefixes(source))
+        {
+            if (!TryMatchPathRoot(qpath, prefix, out var rest))
+            {
+                continue;
+            }
+
+            resolved = CombineRoot(target, rest);
+            return true;
+        }
+
+        resolved = "";
+        return false;
+    }
+
+    private static IEnumerable<string> CandidateMappingPrefixes(string source)
+    {
+        var normalized = Normalize(source).Trim('\\');
+        if (!string.IsNullOrWhiteSpace(normalized))
+        {
+            yield return normalized;
+        }
+
+        var sourceParts = normalized.Split('\\', StringSplitOptions.RemoveEmptyEntries);
+        var shareName = sourceParts.Length > 0 ? sourceParts[^1] : "";
+        if (!string.IsNullOrWhiteSpace(shareName))
+        {
+            yield return shareName;
+            yield return "Shared\\" + shareName;
+        }
+    }
+
+    private static bool TryMatchPathRoot(string path, string root, out string rest)
+    {
+        path = Normalize(path).TrimStart('\\');
+        root = Normalize(root).Trim('\\');
+        if (path.Equals(root, StringComparison.OrdinalIgnoreCase))
+        {
+            rest = "";
+            return true;
+        }
+        if (path.StartsWith(root + "\\", StringComparison.OrdinalIgnoreCase))
+        {
+            rest = path[(root.Length + 1)..];
+            return true;
+        }
+
+        rest = "";
+        return false;
+    }
+
     private static IEnumerable<string> CandidateSharePrefixes(string shareName)
     {
         yield return shareName;
@@ -106,6 +150,21 @@ public sealed class PathMapper(AppConfig config)
     }
 
     private static IReadOnlyList<MappedDrive> NetUseDrives()
+    {
+        lock (MappedDrivesGate)
+        {
+            if (DateTime.UtcNow < _mappedDrivesExpiresUtc)
+            {
+                return _mappedDrives;
+            }
+
+            _mappedDrives = ReadMappedDrives();
+            _mappedDrivesExpiresUtc = DateTime.UtcNow.AddMinutes(2);
+            return _mappedDrives;
+        }
+    }
+
+    private static IReadOnlyList<MappedDrive> ReadMappedDrives()
     {
         try
         {

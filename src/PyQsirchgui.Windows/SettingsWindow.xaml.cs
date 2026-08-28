@@ -105,7 +105,7 @@ public partial class SettingsWindow : Window
         SelectTaggedItem(ThemeBox, string.IsNullOrWhiteSpace(_config.Behavior.Theme) ? "system" : _config.Behavior.Theme);
         SelectTaggedItem(ResultViewBox, string.IsNullOrWhiteSpace(_config.Behavior.ResultView) ? "details" : _config.Behavior.ResultView);
         SelectTaggedItem(ResultSortBox, FirstSortKey(_config.Behavior.ResultSort));
-        HotkeyBox.Text = string.IsNullOrWhiteSpace(_config.Behavior.GlobalHotkey) ? "Ctrl+Space" : _config.Behavior.GlobalHotkey;
+        HotkeyBox.Text = string.IsNullOrWhiteSpace(_config.Behavior.GlobalHotkey) ? "Ctrl+S" : _config.Behavior.GlobalHotkey;
         SearchTimeoutBox.Text = Math.Clamp(_config.Behavior.SearchTimeoutSeconds, 15, 300).ToString();
         FirstPageSizeBox.Text = Math.Clamp(_config.Behavior.FirstPageSize, 5, 500).ToString();
         NextPageSizeBox.Text = Math.Clamp(_config.Behavior.NextPageSize, 10, 500).ToString();
@@ -164,7 +164,7 @@ public partial class SettingsWindow : Window
         _config.Behavior.Theme = SelectedTag(ThemeBox, "system");
         _config.Behavior.ResultView = SelectedTag(ResultViewBox, "details");
         _config.Behavior.ResultSort = SelectedTag(ResultSortBox, "recent");
-        _config.Behavior.GlobalHotkey = string.IsNullOrWhiteSpace(HotkeyBox.Text) ? "Ctrl+Space" : HotkeyBox.Text.Trim();
+        _config.Behavior.GlobalHotkey = string.IsNullOrWhiteSpace(HotkeyBox.Text) ? "Ctrl+S" : HotkeyBox.Text.Trim();
         _config.Behavior.SearchTimeoutSeconds = searchTimeout;
         _config.Behavior.FirstPageSize = firstPageSize;
         _config.Behavior.NextPageSize = nextPageSize;
@@ -233,7 +233,26 @@ public partial class SettingsWindow : Window
 
     private void AddVisibilityRuleClicked(object sender, RoutedEventArgs e)
     {
-        VisibilityRules.Add(new VisibilityRule { Access = "deny", Identity = "*", Pattern = "*", IsGlobal = false });
+        AddVisibilityRule("deny");
+    }
+
+    private void AddVisibilityAllowClicked(object sender, RoutedEventArgs e)
+    {
+        AddVisibilityRule("allow");
+    }
+
+    private void AddVisibilityRule(string access)
+    {
+        var identity = VisibilityThisUserBox.IsChecked == true
+            ? $@"{Environment.UserDomainName}\{Environment.UserName}"
+            : "*";
+        VisibilityRules.Add(new VisibilityRule
+        {
+            Access = access,
+            Identity = identity,
+            Pattern = "*",
+            IsGlobal = VisibilityThisMachineBox.IsChecked != true,
+        });
         VisibilityRulesGrid.SelectedIndex = VisibilityRules.Count - 1;
         VisibilityRulesGrid.ScrollIntoView(VisibilityRulesGrid.SelectedItem);
     }

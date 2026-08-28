@@ -31,7 +31,7 @@ public static class AppLogger
 
     public static void Error(string area, Exception ex, string message)
     {
-        Write("ERROR", area, $"{message}: {ex.GetType().Name}: {ex.Message}");
+        Write("ERROR", area, $"{message}: {ex}".Replace(Environment.NewLine, " | "));
     }
 
     private static void Write(string level, string area, string message)

@@ -200,7 +200,7 @@ public sealed class AppConfig
     private static PathMapping ClonePathMapping(PathMapping mapping) => new() { ShareRoot = mapping.ShareRoot, MappedRoot = mapping.MappedRoot };
     private static ScopedTextRule CloneTextRule(ScopedTextRule rule) => new() { Pattern = rule.Pattern, IsGlobal = rule.IsGlobal };
     private static VisibilityRule CloneVisibilityRule(VisibilityRule rule) => new() { Access = rule.Access, Identity = rule.Identity, Pattern = rule.Pattern, IsGlobal = rule.IsGlobal };
-    private static PinnedTabConfig ClonePinnedTab(PinnedTabConfig tab) => new() { Title = tab.Title, Query = tab.Query, ViewKey = tab.ViewKey, SortValue = tab.SortValue, TypeIndex = tab.TypeIndex };
+    private static PinnedTabConfig ClonePinnedTab(PinnedTabConfig tab) => new() { Title = tab.Title, Query = tab.Query, ViewKey = tab.ViewKey, SortValue = tab.SortValue, TypeIndex = tab.TypeIndex, TypeNames = tab.TypeNames.ToList() };
     private static ExcludeConfig CloneExclude(ExcludeConfig exclude) => new()
     {
         Folders = exclude.Folders.ToList(),
@@ -299,6 +299,9 @@ public sealed class PinnedTabConfig
 
     [JsonPropertyName("type_index")]
     public int TypeIndex { get; set; }
+
+    [JsonPropertyName("type_names")]
+    public List<string> TypeNames { get; set; } = [];
 }
 
 public sealed class PathMapping
@@ -322,7 +325,7 @@ public sealed class BehaviorConfig
     public bool ClearResultsWithQuery { get; set; }
 
     [JsonPropertyName("global_hotkey")]
-    public string GlobalHotkey { get; set; } = "Ctrl+Space";
+    public string GlobalHotkey { get; set; } = "Ctrl+S";
 
     [JsonPropertyName("theme")]
     public string Theme { get; set; } = "system";
@@ -358,7 +361,7 @@ public sealed class BehaviorConfig
     public int SearchTimeoutSeconds { get; set; } = 90;
 
     [JsonPropertyName("first_page_size")]
-    public int FirstPageSize { get; set; } = 25;
+    public int FirstPageSize { get; set; } = 15;
 
     [JsonPropertyName("next_page_size")]
     public int NextPageSize { get; set; } = 100;

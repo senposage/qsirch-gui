@@ -7,7 +7,10 @@ namespace PyQsirchgui.Windows;
 public partial class App : Application
 {
     private const string InstanceMutexName = @"Global\PyQsirchgui.SingleInstance";
+    private const string InstanceActivationEventName = @"Global\PyQsirchgui.ActivateInstance";
     private Mutex? _instanceMutex;
+    private EventWaitHandle? _activationEvent;
+    private RegisteredWaitHandle? _activationWait;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -16,6 +19,14 @@ public partial class App : Application
             Shutdown();
             return;
         }
+
+        _activationEvent = new EventWaitHandle(false, EventResetMode.AutoReset, InstanceActivationEventName, out _);
+        _activationWait = ThreadPool.RegisterWaitForSingleObject(
+            _activationEvent,
+            (_, _) => Dispatcher.BeginInvoke(ActivateExistingWindow),
+            null,
+            Timeout.Infinite,
+            executeOnlyOnce: false);
 
         var assembly = Assembly.GetExecutingAssembly().GetName();
         AppLogger.Info("app", $"startup assembly={assembly.Name} version={assembly.Version} streaming_search=True");
@@ -44,6 +55,11 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _activationWait?.Unregister(null);
+        _activationWait = null;
+        _activationEvent?.Dispose();
+        _activationEvent = null;
+
         try
         {
             _instanceMutex?.ReleaseMutex();
@@ -72,11 +88,7 @@ public partial class App : Application
             }
 
             mutex.Dispose();
-            MessageBox.Show(
-                "PyQsirchgui is already running on this computer. Close the existing instance before starting another.",
-                "PyQsirchgui already running",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+            SignalExistingInstance();
             return false;
         }
         catch (UnauthorizedAccessException)
@@ -87,6 +99,29 @@ public partial class App : Application
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
             return false;
+        }
+    }
+
+    private void ActivateExistingWindow()
+    {
+        if (MainWindow is MainWindow window)
+        {
+            window.ActivateFromExternalLaunch();
+        }
+    }
+
+    private static void SignalExistingInstance()
+    {
+        try
+        {
+            using var activationEvent = EventWaitHandle.OpenExisting(InstanceActivationEventName);
+            activationEvent.Set();
+        }
+        catch (WaitHandleCannotBeOpenedException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
         }
     }
 }

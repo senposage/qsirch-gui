@@ -11,7 +11,9 @@ namespace PyQsirchgui.Windows.Services;
 
 public sealed class QsirchClient(AppConfig config) : IDisposable
 {
+    private const int MaxThumbnailBytes = 4 * 1024 * 1024;
     private readonly HttpClient _http = CreateHttpClient(config);
+    private readonly SemaphoreSlim _loginGate = new(1, 1);
     private readonly string _baseUrl = $"{(config.Ssl ? "https" : "http")}://{config.Host}:{config.Port}";
     private bool _loggedIn;
     private string _sid = "";
@@ -280,7 +282,30 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
             AppLogger.Warn("qsirch", $"thumbnail response non-image contentType=\"{contentType}\" path=\"{result.DisplayPath}\" name=\"{result.FileName}\"");
             return null;
         }
-        return await response.Content.ReadAsByteArrayAsync(cancellationToken);
+        var contentLength = response.Content.Headers.ContentLength;
+        if (contentLength is > MaxThumbnailBytes)
+        {
+            AppLogger.Warn("qsirch", $"thumbnail skipped too large bytes={contentLength} limit={MaxThumbnailBytes} path=\"{result.DisplayPath}\" name=\"{result.FileName}\"");
+            return null;
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        var capacity = contentLength.HasValue && contentLength.Value > 0 && contentLength.Value <= MaxThumbnailBytes
+            ? (int)contentLength.Value
+            : 0;
+        using var buffer = new MemoryStream(capacity);
+        var chunk = new byte[81920];
+        int read;
+        while ((read = await stream.ReadAsync(chunk, cancellationToken)) > 0)
+        {
+            if (buffer.Length + read > MaxThumbnailBytes)
+            {
+                AppLogger.Warn("qsirch", $"thumbnail skipped after limit bytes={buffer.Length + read} limit={MaxThumbnailBytes} path=\"{result.DisplayPath}\" name=\"{result.FileName}\"");
+                return null;
+            }
+            buffer.Write(chunk, 0, read);
+        }
+        return buffer.ToArray();
     }
 
     private async Task LoginAsync(CancellationToken cancellationToken)
@@ -290,39 +315,60 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
             return;
         }
 
-        var stopwatch = Stopwatch.StartNew();
-        AppLogger.Info("qsirch", $"login request host=\"{config.Host}\" port={config.Port} ssl={config.Ssl} verify={config.SslVerify} userSet={!string.IsNullOrWhiteSpace(config.User)}");
-        var encodedPassword = Convert.ToBase64String(Encoding.UTF8.GetBytes(config.Password));
-        using var content = new FormUrlEncodedContent(new Dictionary<string, string>
+        await _loginGate.WaitAsync(cancellationToken);
+        try
         {
-            ["user"] = config.User,
-            ["pwd"] = encodedPassword,
-        });
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl}/cgi-bin/authLogin.cgi") { Content = content };
-        using var response = await SendWithTimeoutLoggingAsync(request, "login", stopwatch, cancellationToken);
-        AppLogger.Info("qsirch", $"login response status={(int)response.StatusCode} elapsed={stopwatch.ElapsedMilliseconds}ms");
-        response.EnsureSuccessStatusCode();
-        var xml = XDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
-        if (xml.Root?.Element("authPassed")?.Value != "1")
-        {
-            throw new InvalidOperationException("QNAP authentication failed.");
+            if (_loggedIn)
+            {
+                return;
+            }
+
+            var stopwatch = Stopwatch.StartNew();
+            AppLogger.Info("qsirch", $"login request host=\"{config.Host}\" port={config.Port} ssl={config.Ssl} verify={config.SslVerify} userSet={!string.IsNullOrWhiteSpace(config.User)}");
+            var encodedPassword = Convert.ToBase64String(Encoding.UTF8.GetBytes(config.Password));
+            using var content = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["user"] = config.User,
+                ["pwd"] = encodedPassword,
+            });
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl}/cgi-bin/authLogin.cgi") { Content = content };
+            using var response = await SendWithTimeoutLoggingAsync(request, "login", stopwatch, cancellationToken);
+            AppLogger.Info("qsirch", $"login response status={(int)response.StatusCode} elapsed={stopwatch.ElapsedMilliseconds}ms");
+            response.EnsureSuccessStatusCode();
+            var xml = XDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+            if (xml.Root?.Element("authPassed")?.Value != "1")
+            {
+                throw new InvalidOperationException("QNAP authentication failed.");
+            }
+            _sid = xml.Root?.Element("authSid")?.Value ?? "";
+            if (string.IsNullOrWhiteSpace(_sid))
+            {
+                throw new InvalidOperationException("QNAP did not return an authSid.");
+            }
+            _http.DefaultRequestHeaders.Remove("Cookie");
+            _http.DefaultRequestHeaders.Add("Cookie", $"NAS_SID={_sid}");
+            _loggedIn = true;
+            AppLogger.Info("qsirch", $"login success elapsed={stopwatch.ElapsedMilliseconds}ms");
         }
-        _sid = xml.Root?.Element("authSid")?.Value ?? "";
-        if (string.IsNullOrWhiteSpace(_sid))
+        finally
         {
-            throw new InvalidOperationException("QNAP did not return an authSid.");
+            _loginGate.Release();
         }
-        _http.DefaultRequestHeaders.Remove("Cookie");
-        _http.DefaultRequestHeaders.Add("Cookie", $"NAS_SID={_sid}");
-        _loggedIn = true;
-        AppLogger.Info("qsirch", $"login success elapsed={stopwatch.ElapsedMilliseconds}ms");
     }
 
     public static SearchResult ResultFromJson(JsonElement element)
     {
-        var name = GetString(element, "name");
+        var name = GetName(element);
         var ext = GetString(element, "extension").TrimStart('.');
         var path = GetPath(element);
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            var nameFromPath = Path.GetFileName(path.TrimEnd('\\', '/'));
+            if (!string.IsNullOrWhiteSpace(ext) && nameFromPath.EndsWith("." + ext, StringComparison.OrdinalIgnoreCase))
+            {
+                name = nameFromPath;
+            }
+        }
         var type = GetString(element, "type");
         var result = new SearchResult
         {
@@ -335,6 +381,13 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
             Raw = element,
         };
         result.IsFolder = IsFolder(result, element);
+        if (!result.IsFolder && !result.HasUsableFileName)
+        {
+            var keys = element.ValueKind == JsonValueKind.Object
+                ? string.Join(',', element.EnumerateObject().Select(property => property.Name))
+                : "";
+            AppLogger.Warn("qsirch", $"result missing filename extension=\"{ext}\" path=\"{path}\" keys=\"{keys}\"");
+        }
         return result;
     }
 
@@ -398,24 +451,62 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
 
     private static string GetPath(JsonElement element)
     {
-        if (element.TryGetProperty("preview", out var preview) &&
-            preview.TryGetProperty("info", out var info) &&
-            info.ValueKind == JsonValueKind.Array)
+        return GetPreviewInfoValue(element, "path") ?? GetString(element, "path");
+    }
+
+    private static string GetName(JsonElement element)
+    {
+        foreach (var property in new[] { "name", "filename", "file_name" })
         {
-            foreach (var item in info.EnumerateArray())
+            var value = GetString(element, property);
+            if (!string.IsNullOrWhiteSpace(value))
             {
-                if (GetString(item, "key").Equals("path", StringComparison.OrdinalIgnoreCase))
-                {
-                    return GetString(item, "value");
-                }
+                return value;
+            }
+            value = GetPreviewInfoValue(element, property);
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
             }
         }
-        return GetString(element, "path");
+        return "";
+    }
+
+    private static string? GetPreviewInfoValue(JsonElement element, string key)
+    {
+        if (!element.TryGetProperty("preview", out var preview) ||
+            !preview.TryGetProperty("info", out var info) ||
+            info.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        foreach (var item in info.EnumerateArray())
+        {
+            if (GetString(item, "key").Equals(key, StringComparison.OrdinalIgnoreCase))
+            {
+                return GetString(item, "value");
+            }
+        }
+        return null;
     }
 
     private static string GetString(JsonElement element, string name)
     {
-        return element.TryGetProperty(name, out var value) && value.ValueKind != JsonValueKind.Null ? value.ToString() ?? "" : "";
+        if (element.TryGetProperty(name, out var value) && value.ValueKind != JsonValueKind.Null)
+        {
+            return value.ToString() ?? "";
+        }
+
+        foreach (var property in element.EnumerateObject())
+        {
+            if (property.Name.Equals(name, StringComparison.OrdinalIgnoreCase) && property.Value.ValueKind != JsonValueKind.Null)
+            {
+                return property.Value.ToString() ?? "";
+            }
+        }
+
+        return "";
     }
 
     private static long GetLong(JsonElement element, string name)
@@ -431,5 +522,9 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
         return long.TryParse(value.ToString(), out var parsed) ? parsed : 0;
     }
 
-    public void Dispose() => _http.Dispose();
+    public void Dispose()
+    {
+        _loginGate.Dispose();
+        _http.Dispose();
+    }
 }

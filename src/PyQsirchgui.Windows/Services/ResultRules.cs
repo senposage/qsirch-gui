@@ -4,9 +4,17 @@ using PyQsirchgui.Windows.Models;
 
 namespace PyQsirchgui.Windows.Services;
 
-public sealed class ResultRules(AppConfig config)
+public sealed class ResultRules
 {
-    private readonly HashSet<string> _identities = CurrentIdentities();
+    private readonly AppConfig _config;
+    private readonly HashSet<string> _identities;
+
+    public ResultRules(AppConfig config)
+    {
+        _config = config;
+        _identities = CurrentIdentities();
+        AppLogger.Info("rules", $"visibility identities={string.Join(", ", _identities.OrderBy(identity => identity))} rules={config.VisibilityRules.Count}");
+    }
 
     public bool IsHidden(SearchResult result)
     {
@@ -29,7 +37,7 @@ public sealed class ResultRules(AppConfig config)
             }
         }
 
-        foreach (var rule in config.Exclude.Folders.Where(x => !string.IsNullOrWhiteSpace(x)))
+        foreach (var rule in _config.Exclude.Folders.Where(x => !string.IsNullOrWhiteSpace(x)))
         {
             var normalized = Normalize(rule);
             if (HasWildcard(normalized))
@@ -47,7 +55,7 @@ public sealed class ResultRules(AppConfig config)
             }
         }
 
-        foreach (var rule in config.Exclude.Files.Where(x => !string.IsNullOrWhiteSpace(x)))
+        foreach (var rule in _config.Exclude.Files.Where(x => !string.IsNullOrWhiteSpace(x)))
         {
             if (HasWildcard(rule))
             {
@@ -67,7 +75,7 @@ public sealed class ResultRules(AppConfig config)
 
     private bool IsVisibilityHidden(SearchResult result)
     {
-        var rules = config.VisibilityRules.Where(rule => !string.IsNullOrWhiteSpace(rule.Pattern)).ToList();
+        var rules = _config.VisibilityRules.Where(rule => !string.IsNullOrWhiteSpace(rule.Pattern)).ToList();
         if (rules.Count == 0)
         {
             return false;
@@ -119,6 +127,22 @@ public sealed class ResultRules(AppConfig config)
             if (!string.IsNullOrWhiteSpace(identity.Name))
             {
                 set.Add(identity.Name);
+            }
+            if (identity.Groups != null)
+            {
+                foreach (var group in identity.Groups)
+                {
+                    try
+                    {
+                        if (group.Translate(typeof(NTAccount)) is NTAccount account && !string.IsNullOrWhiteSpace(account.Value))
+                        {
+                            set.Add(account.Value);
+                        }
+                    }
+                    catch (IdentityNotMappedException)
+                    {
+                    }
+                }
             }
         }
         catch

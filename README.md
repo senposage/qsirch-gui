@@ -4,7 +4,7 @@ PyQsirchgui is a portable Windows desktop search application for QNAP Qsirch. It
 
 The active application is a native WPF Windows client. The original Qsirch Python CLI remains in this repository as the upstream-compatible API implementation.
 
-> **Status:** v0.8b test build. This is the branch for testing the native Windows GUI before wider deployment.
+> **Status:** v0.9 test build. This is the branch for testing the native Windows GUI before wider deployment.
 
 ## Highlights
 

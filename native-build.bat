@@ -32,3 +32,5 @@ echo.
 echo SUCCESS
 echo   %PACKAGE%\PyQsirchgui.exe
 echo   %PACKAGE%\config\config.json
+
+pause

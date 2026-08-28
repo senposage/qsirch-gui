@@ -34,7 +34,7 @@ Portable deployment:
 Appearance / behavior:
 - Settings has an Appearance / Behavior tab.
 - Show in taskbar is enabled by default. Disable it for tray-only/tool-window behavior.
-- The global hide/unhide shortcut defaults to Ctrl+Space and can be changed without restarting.
+- The global hide/unhide shortcut defaults to Ctrl+S and can be changed without restarting.
 - If Windows reports the shortcut is already owned by another app, Settings shows a warning.
 - The native app has a project icon under Assets\app.ico.
 - Search tabs keep separate query text, result lists, view mode, sort, filter, and status.
