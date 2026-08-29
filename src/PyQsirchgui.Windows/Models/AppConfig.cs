@@ -10,10 +10,10 @@ public sealed class AppConfig
     public string Host { get; set; } = "";
 
     [JsonPropertyName("port")]
-    public int Port { get; set; } = 8080;
+    public int Port { get; set; } = 443;
 
     [JsonPropertyName("ssl")]
-    public bool Ssl { get; set; }
+    public bool Ssl { get; set; } = true;
 
     [JsonPropertyName("ssl_verify")]
     public bool SslVerify { get; set; }
@@ -192,7 +192,7 @@ public sealed class AppConfig
     private static PathMapping ClonePathMapping(PathMapping mapping) => new() { ShareRoot = mapping.ShareRoot, MappedRoot = mapping.MappedRoot };
     private static ScopedTextRule CloneTextRule(ScopedTextRule rule) => new() { Pattern = rule.Pattern, IsGlobal = rule.IsGlobal };
     private static VisibilityRule CloneVisibilityRule(VisibilityRule rule) => new() { Access = rule.Access, Identity = rule.Identity, Pattern = rule.Pattern, IsGlobal = rule.IsGlobal };
-    private static PinnedTabConfig ClonePinnedTab(PinnedTabConfig tab) => new() { Title = tab.Title, Query = tab.Query, ViewKey = tab.ViewKey, SortValue = tab.SortValue, TypeIndex = tab.TypeIndex, TypeNames = tab.TypeNames.ToList() };
+    private static PinnedTabConfig ClonePinnedTab(PinnedTabConfig tab) => new() { Title = tab.Title, Query = tab.Query, ViewKey = tab.ViewKey, SortValue = tab.SortValue, TypeIndex = tab.TypeIndex, TypeNames = tab.TypeNames.ToList(), DateFrom = tab.DateFrom, DateTo = tab.DateTo };
     private static ExcludeConfig CloneExclude(ExcludeConfig exclude) => new()
     {
         FolderRules = exclude.FolderRules.Select(CloneTextRule).ToList(),
@@ -214,8 +214,6 @@ public sealed class AppConfig
         PreviewPane = behavior.PreviewPane,
         AllowDownload = behavior.AllowDownload,
         FoldersFirst = behavior.FoldersFirst,
-        ShowMatchingParentFolders = behavior.ShowMatchingParentFolders,
-        CollapseMatchingFolderResults = behavior.CollapseMatchingFolderResults,
         ResultView = behavior.ResultView,
         ResultSort = behavior.ResultSort,
         VisibleDetailColumns = behavior.VisibleDetailColumns.ToList(),
@@ -238,10 +236,10 @@ public sealed class HostConfig
     public string Host { get; set; } = "";
 
     [JsonPropertyName("port")]
-    public int Port { get; set; } = 8080;
+    public int Port { get; set; } = 443;
 
     [JsonPropertyName("ssl")]
-    public bool Ssl { get; set; }
+    public bool Ssl { get; set; } = true;
 
     [JsonPropertyName("ssl_verify")]
     public bool SslVerify { get; set; }
@@ -293,6 +291,12 @@ public sealed class PinnedTabConfig
 
     [JsonPropertyName("type_names")]
     public List<string> TypeNames { get; set; } = [];
+
+    [JsonPropertyName("date_from")]
+    public DateTime? DateFrom { get; set; }
+
+    [JsonPropertyName("date_to")]
+    public DateTime? DateTo { get; set; }
 }
 
 public sealed class PathMapping
@@ -347,12 +351,6 @@ public sealed class BehaviorConfig
 
     [JsonPropertyName("folders_first")]
     public bool FoldersFirst { get; set; } = true;
-
-    [JsonPropertyName("show_matching_parent_folders")]
-    public bool ShowMatchingParentFolders { get; set; } = true;
-
-    [JsonPropertyName("collapse_matching_folder_results")]
-    public bool CollapseMatchingFolderResults { get; set; }
 
     [JsonPropertyName("result_view")]
     public string ResultView { get; set; } = "details";

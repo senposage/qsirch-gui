@@ -14,9 +14,11 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
     private const int MaxThumbnailBytes = 4 * 1024 * 1024;
     private readonly HttpClient _http = CreateHttpClient(config);
     private readonly SemaphoreSlim _loginGate = new(1, 1);
+    private readonly QsirchSessionStore _sessionStore = new(config);
     private readonly string _baseUrl = $"{(config.Ssl ? "https" : "http")}://{config.Host}:{config.Port}";
     private bool _loggedIn;
     private string _sid = "";
+    private DateTimeOffset _nextLoginAttemptUtc;
 
     public async Task<IReadOnlyList<SearchResult>> SearchAsync(string query, FileTypeFilter typeFilter, CancellationToken cancellationToken)
     {
@@ -61,23 +63,22 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
         var stopwatch = Stopwatch.StartNew();
         limit = Math.Clamp(limit, 1, 500);
         offset = Math.Max(0, offset);
-        var url = $"{_baseUrl}/qsirch/latest/api/search?q={Uri.EscapeDataString(query)}&limit={limit}&offset={offset}&advanced_mode=0";
+        var serverQuery = string.IsNullOrWhiteSpace(typeFilter.Category) ||
+                          typeFilter.Category.Equals("All", StringComparison.OrdinalIgnoreCase)
+            ? query
+            : $"{query} category:{typeFilter.Category}";
+        var url = $"{_baseUrl}/qsirch/latest/api/search?q={Uri.EscapeDataString(serverQuery)}&limit={limit}&offset={offset}&advanced_mode=0&store_history=0";
         if (!string.IsNullOrWhiteSpace(sortBy) && !sortBy.Equals("relevance", StringComparison.OrdinalIgnoreCase))
         {
             url += $"&sort_by={Uri.EscapeDataString(sortBy)}&sort_dir={Uri.EscapeDataString(sortDir)}";
         }
-        var searchMethod = typeFilter.Category.Equals("All", StringComparison.OrdinalIgnoreCase) ? HttpMethod.Get : HttpMethod.Post;
+        var searchMethod = HttpMethod.Get;
         HttpRequestMessage CreateSearchRequest()
         {
-            var request = new HttpRequestMessage(searchMethod, url);
-            if (!typeFilter.Category.Equals("All", StringComparison.OrdinalIgnoreCase))
-            {
-                request.Content = new StringContent(JsonSerializer.Serialize(new { tools = typeFilter.Category, limit }), Encoding.UTF8, "application/json");
-            }
-            return request;
+            return new HttpRequestMessage(searchMethod, url);
         }
 
-        AppLogger.Info("qsirch", $"search request method={searchMethod} host=\"{config.Host}\" port={config.Port} ssl={config.Ssl} verify={config.SslVerify} timeout={_http.Timeout.TotalSeconds:n0}s streaming=True query=\"{query}\" type=\"{typeFilter.Name}\" category=\"{typeFilter.Category}\" limit={limit} offset={offset} sort=\"{sortBy ?? "relevance"}:{sortDir}\"");
+        AppLogger.Info("qsirch", $"search request method={searchMethod} host=\"{config.Host}\" port={config.Port} ssl={config.Ssl} verify={config.SslVerify} timeout={_http.Timeout.TotalSeconds:n0}s streaming=True query=\"{query}\" serverQuery=\"{serverQuery}\" type=\"{typeFilter.Name}\" category=\"{typeFilter.Category}\" limit={limit} offset={offset} sort=\"{sortBy ?? "relevance"}:{sortDir}\"");
         using var response = await SendWithSessionRecoveryAsync(CreateSearchRequest, "search", stopwatch, cancellationToken, HttpCompletionOption.ResponseHeadersRead);
         AppLogger.Info("qsirch", $"search response status={(int)response.StatusCode} elapsed={stopwatch.ElapsedMilliseconds}ms");
         response.EnsureSuccessStatusCode();
@@ -93,6 +94,69 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
             throw new TimeoutException($"Qsirch search timed out after {_http.Timeout.TotalSeconds:n0} seconds.");
         }
         AppLogger.Info("qsirch", $"search parsed returned={results.Count} limit={limit} offset={offset} sort=\"{sortBy ?? "relevance"}:{sortDir}\" elapsed={stopwatch.ElapsedMilliseconds}ms");
+        return results;
+    }
+
+    public async Task<IReadOnlyList<SearchResult>> SearchDirectoriesAsync(string query, int limit, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(config.Host) || string.IsNullOrWhiteSpace(config.User) || string.IsNullOrWhiteSpace(config.Password))
+        {
+            throw new InvalidOperationException("Configure the NAS connection in config.json first.");
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        limit = Math.Clamp(limit, 1, 100);
+        var url = $"{_baseUrl}/qsirch/latest/api/search-dirs?q={Uri.EscapeDataString(query)}&limit={limit}";
+        AppLogger.Info("qsirch", $"directory search request host=\"{config.Host}\" port={config.Port} ssl={config.Ssl} verify={config.SslVerify} query=\"{query}\" limit={limit}");
+        using var response = await SendWithSessionRecoveryAsync(
+            () => new HttpRequestMessage(HttpMethod.Get, url),
+            "directory search",
+            stopwatch,
+            cancellationToken);
+        AppLogger.Info("qsirch", $"directory search response status={(int)response.StatusCode} elapsed={stopwatch.ElapsedMilliseconds}ms");
+        response.EnsureSuccessStatusCode();
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        if (!document.RootElement.TryGetProperty("items", out var items) || items.ValueKind != JsonValueKind.Array)
+        {
+            AppLogger.Warn("qsirch", $"directory search response had no items array elapsed={stopwatch.ElapsedMilliseconds}ms");
+            return [];
+        }
+
+        var results = new List<SearchResult>();
+        var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in items.EnumerateArray())
+        {
+            var path = GetString(item, "name").Trim();
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                continue;
+            }
+
+            var normalizedPath = path.Replace('/', '\\').TrimEnd('\\');
+            if (!seenPaths.Add(normalizedPath))
+            {
+                continue;
+            }
+
+            var name = Path.GetFileName(normalizedPath);
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                continue;
+            }
+
+            results.Add(new SearchResult
+            {
+                Name = name,
+                Path = path,
+                Type = "Folder",
+                IsFolder = true,
+                Raw = item.Clone(),
+            });
+        }
+
+        AppLogger.Info("qsirch", $"directory search parsed returned={results.Count} limit={limit} elapsed={stopwatch.ElapsedMilliseconds}ms");
         return results;
     }
 
@@ -330,6 +394,18 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
                 return;
             }
 
+            ResumeLocalSession();
+            if (_loggedIn)
+            {
+                return;
+            }
+
+            if (DateTimeOffset.UtcNow < _nextLoginAttemptUtc)
+            {
+                var remaining = Math.Ceiling((_nextLoginAttemptUtc - DateTimeOffset.UtcNow).TotalSeconds);
+                throw new InvalidOperationException($"Qsirch session is unavailable. Waiting {remaining:n0} seconds before another sign-in attempt.");
+            }
+
             var stopwatch = Stopwatch.StartNew();
             AppLogger.Info("qsirch", $"login request host=\"{config.Host}\" port={config.Port} ssl={config.Ssl} verify={config.SslVerify} userSet={!string.IsNullOrWhiteSpace(config.User)}");
             var encodedPassword = Convert.ToBase64String(Encoding.UTF8.GetBytes(config.Password));
@@ -347,14 +423,14 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
             {
                 throw new InvalidOperationException("QNAP authentication failed.");
             }
-            _sid = xml.Root?.Element("authSid")?.Value ?? "";
-            if (string.IsNullOrWhiteSpace(_sid))
+            var sessionId = xml.Root?.Element("authSid")?.Value ?? "";
+            if (string.IsNullOrWhiteSpace(sessionId))
             {
                 throw new InvalidOperationException("QNAP did not return an authSid.");
             }
-            _http.DefaultRequestHeaders.Remove("Cookie");
-            _http.DefaultRequestHeaders.Add("Cookie", $"NAS_SID={_sid}");
-            _loggedIn = true;
+            ApplySession(sessionId);
+            _sessionStore.Save(sessionId);
+            _nextLoginAttemptUtc = DateTimeOffset.MinValue;
             AppLogger.Info("qsirch", $"login success elapsed={stopwatch.ElapsedMilliseconds}ms");
         }
         finally
@@ -429,14 +505,22 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
             var sessionId = _sid;
             using var request = requestFactory();
             var response = await SendWithTimeoutLoggingAsync(request, operation, stopwatch, cancellationToken, completionOption);
-            if (response.StatusCode != HttpStatusCode.Unauthorized || attempt == 1)
+            if (response.StatusCode != HttpStatusCode.Unauthorized)
             {
                 return response;
             }
 
-            AppLogger.Warn("qsirch", $"{operation} response status=401; session expired, signing in again and retrying once");
             response.Dispose();
             InvalidateSession(sessionId);
+            if (attempt == 0)
+            {
+                AppLogger.Warn("qsirch", $"{operation} response status=401; session rejected, signing in once and retrying");
+                continue;
+            }
+
+            _nextLoginAttemptUtc = DateTimeOffset.UtcNow.AddSeconds(45);
+            AppLogger.Warn("qsirch", $"{operation} response status=401 after a fresh sign-in; pausing retries for 45s to prevent a login loop");
+            throw new InvalidOperationException("Qsirch rejected the refreshed session. Search retries are paused briefly to prevent repeated sign-ins.");
         }
 
         throw new InvalidOperationException("Unable to recover the Qsirch session.");
@@ -452,6 +536,27 @@ public sealed class QsirchClient(AppConfig config) : IDisposable
         _loggedIn = false;
         _sid = "";
         _http.DefaultRequestHeaders.Remove("Cookie");
+        _sessionStore.Clear();
+    }
+
+    private void ResumeLocalSession()
+    {
+        var sessionId = _sessionStore.Read();
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            return;
+        }
+
+        ApplySession(sessionId);
+        AppLogger.Info("qsirch", "resumed encrypted local Qsirch session");
+    }
+
+    private void ApplySession(string sessionId)
+    {
+        _sid = sessionId;
+        _http.DefaultRequestHeaders.Remove("Cookie");
+        _http.DefaultRequestHeaders.Add("Cookie", $"NAS_SID={sessionId}");
+        _loggedIn = true;
     }
 
     private static HttpClient CreateHttpClient(AppConfig config)

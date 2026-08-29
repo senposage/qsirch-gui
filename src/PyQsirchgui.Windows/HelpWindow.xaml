@@ -94,7 +94,7 @@
           <ColumnDefinition Width="*" />
           <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
-        <TextBlock Text="v1.0.1  Written by Robert J Crane"
+        <TextBlock Text="v1.1.0  Written by Robert J Crane"
                    Foreground="{DynamicResource AppMutedTextBrush}"
                    VerticalAlignment="Center" />
         <Button Grid.Column="1" Content="Close" IsCancel="True" Margin="18,0,0,0" />
@@ -114,13 +114,14 @@
       <StackPanel>
         <TextBlock Style="{StaticResource SectionTitle}" Text="Search" />
         <TextBlock Text="Type a filename or phrase, then press Enter or Search. By default, PyQsirchgui prioritizes file names so searches stay focused. Turn on Search contents when you need words found inside documents as well." />
-        <TextBlock Margin="0,7,0,0" Text="Turn on Exact match to find whole words in file names, such as finding &quot;pie&quot; without also finding &quot;Pierce&quot;. Use the file-type button to select one or more types, including Folders. Clear the selection to search every type again." />
-        <TextBlock Margin="0,7,0,0" Text="The clock button shows your recent searches. Save search keeps the current query in the Favorites pane, where double-clicking it runs the search again. Load more expands the current result limit when a broad search has more matches to fetch." />
+        <TextBlock Margin="0,7,0,0" Text="Turn on Exact match to find whole words in file names, such as finding &quot;pie&quot; without also finding &quot;Pierce&quot;. Use the file-type button to select one or more types. Folder rows appear only when Folders is selected, and they are actual folder matches returned by Qsirch. Clear the selection to search every type again." />
+        <TextBlock Margin="0,7,0,0" Text="Use Clear filters to reset file type, Exact match, Search contents, date, and scope without clearing the tab or changing its view and arrangement. Changing a file type during a search restarts that tab so stale results do not linger." />
+        <TextBlock Margin="0,7,0,0" Text="The clock button shows your recent searches. Save search keeps the current query in the Favorites pane, where double-clicking it runs the search again. Load more expands the current result limit when a broad search has more matches to fetch. When the server has no more matches, the limit notice disappears." />
 
         <TextBlock Style="{StaticResource SectionTitle}" Text="Results and sorting" />
         <TextBlock Text="Double-click a result to open it in its normal Windows application. Open does the same thing; Show opens File Explorer with the file selected. Right-click a result for the same actions, Favorites, and Copy full path." />
         <TextBlock Margin="0,7,0,0" Text="Choose Details, List, Small icons, or Large icons from the view control. The Arrange menu includes Folder groups, which creates expandable folder sections in Details view. In Details view, click a column heading to sort. Hold Ctrl while clicking another heading to add a second sort." />
-        <TextBlock Margin="0,7,0,0" Text="Scope narrows the current search to All folders, This folder, or Modified recently. Select a result before choosing This folder. Right-click a result to open it, show it, view Properties, copy its path, or open a new scoped search tab for its folder." />
+        <TextBlock Margin="0,7,0,0" Text="Scope narrows the current search to All folders, This folder, or Modified recently. Select a result before choosing This folder. The modified-date calendar prevents future dates; To starts at today, and a blank From with To set to today means no date restriction. Folder dates are read from the mapped Windows folder when available. Folder size remains blank so searches never perform slow recursive folder scans." />
 
         <TextBlock Style="{StaticResource SectionTitle}" Text="Favorites and groups" />
         <TextBlock Text="Use the star on a result or Add to Favorites to keep a file handy. Select several results with Ctrl or Shift, then add all of them at once. Favorites and groups are private to the current Windows user on this computer." />
@@ -130,8 +131,8 @@
         <TextBlock Text="Preview uses the Windows preview handler installed on the computer. PDFs, Word, Excel, and similar files can preview when Windows has a compatible handler. The file is opened from its mapped Windows path; Qsirch is not used to download preview content. Video previews are intentionally unavailable." />
 
         <TextBlock Style="{StaticResource SectionTitle}" Text="Settings" />
-        <TextBlock Text="Connection contains the NAS address, port, HTTPS, certificate verification, and sign-in details. Use HTTPS only when the NAS is actually configured for it. Certificate verification should normally stay on; turn it off only for a trusted NAS using a self-signed certificate." />
-        <TextBlock Margin="0,7,0,0" Text="Behavior controls taskbar visibility, standard Windows framing, always-on-top, the theme, default view and sort, highlighting matching text, preview availability, and whether Clear also clears visible results. Matching parent folders can appear above their matching files, or collapse those files into one folder result. The global shortcut can show or hide the window without reopening the app." />
+        <TextBlock Text="Connection contains the NAS address, port, HTTPS, certificate verification, and sign-in details. Enabling HTTPS changes the default Qsirch HTTP port from 8080 to 443; keep a custom HTTPS port if your NAS uses one. Certificate verification should normally stay on; turn it off only for a trusted NAS using a self-signed certificate. The app securely reuses the current Windows user's local Qsirch session and refreshes it once when it expires." />
+        <TextBlock Margin="0,7,0,0" Text="Behavior controls taskbar visibility, standard Windows framing, always-on-top, the theme, default view and sort, highlighting matching text, preview availability, and whether Clear also clears visible results. The global shortcut can show or hide the window without reopening the app." />
         <TextBlock Margin="0,7,0,0" Text="Path Mapping tells Open, Show, and Preview which drive or UNC location matches a Qsirch path. Map as deeply as needed: a mapping for a shared folder also covers every folder beneath it." />
         <TextBlock Margin="0,7,0,0" Text="Rules hide results by path pattern and optionally by Windows user or computer. They are visibility-only rules: they never grant access to files. Use a wildcard such as @recycle\* to hide the contents of a folder. Mark a rule Global when it should apply to every workstation." />
         <TextBlock Margin="0,7,0,0" Text="History manages saved data. Favorites, groups, saved searches, and recent searches are stored in a small local database for the current Windows user. Clear History leaves Favorites alone unless you select the starred-results option. Reset local saved-data database removes all of that user's saved items on this computer." />

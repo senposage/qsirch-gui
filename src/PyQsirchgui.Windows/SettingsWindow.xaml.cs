@@ -15,6 +15,7 @@ public partial class SettingsWindow : Window
     {
         InitializeComponent();
         StateChanged += (_, _) => UpdateCaptionButtons();
+        SslBox.Checked += SslBoxChecked;
         _config = config;
         ThemePalette.Apply(Resources, string.IsNullOrWhiteSpace(_config.Behavior.Theme) ? "system" : _config.Behavior.Theme);
         Mappings = new ObservableCollection<PathMapping>(_config.PathMappings.Select(x => new PathMapping { ShareRoot = x.ShareRoot, MappedRoot = x.MappedRoot }));
@@ -98,8 +99,6 @@ public partial class SettingsWindow : Window
         ClearResultsWithQueryBox.IsChecked = _config.Behavior.ClearResultsWithQuery;
         AlwaysOnTopBox.IsChecked = _config.AlwaysOnTop;
         FoldersFirstBox.IsChecked = _config.Behavior.FoldersFirst;
-        MatchingFoldersBox.IsChecked = _config.Behavior.ShowMatchingParentFolders;
-        CollapseMatchingFoldersBox.IsChecked = _config.Behavior.CollapseMatchingFolderResults;
         SearchContentsBox.IsChecked = _config.Behavior.SearchContents;
         HighlightMatchesBox.IsChecked = _config.Behavior.HighlightMatches;
         ShowInternalPathsBox.IsChecked = _config.Behavior.ShowQsirchInternalPaths;
@@ -145,6 +144,12 @@ public partial class SettingsWindow : Window
             return;
         }
 
+        if (SslBox.IsChecked == true && port == 8080)
+        {
+            port = 443;
+            PortBox.Text = port.ToString();
+        }
+
         CommitTableEdits();
         _config.Host = HostBox.Text.Trim();
         _config.Port = port;
@@ -158,8 +163,6 @@ public partial class SettingsWindow : Window
         _config.Behavior.ClearResultsWithQuery = ClearResultsWithQueryBox.IsChecked == true;
         _config.AlwaysOnTop = AlwaysOnTopBox.IsChecked == true;
         _config.Behavior.FoldersFirst = FoldersFirstBox.IsChecked == true;
-        _config.Behavior.ShowMatchingParentFolders = MatchingFoldersBox.IsChecked == true;
-        _config.Behavior.CollapseMatchingFolderResults = CollapseMatchingFoldersBox.IsChecked == true;
         _config.Behavior.SearchContents = SearchContentsBox.IsChecked == true;
         _config.Behavior.HighlightMatches = HighlightMatchesBox.IsChecked == true;
         _config.Behavior.ShowQsirchInternalPaths = ShowInternalPathsBox.IsChecked == true;
@@ -201,6 +204,14 @@ public partial class SettingsWindow : Window
         ClearHistoryRequested = ClearHistoryBox.IsChecked == true;
         ClearStarredRequested = ClearStarredBox.IsChecked == true;
         DialogResult = true;
+    }
+
+    private void SslBoxChecked(object sender, RoutedEventArgs e)
+    {
+        if (PortBox.Text.Trim() == "8080")
+        {
+            PortBox.Text = "443";
+        }
     }
 
     private void CancelClicked(object sender, RoutedEventArgs e)

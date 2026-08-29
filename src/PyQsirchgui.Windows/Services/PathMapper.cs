@@ -31,7 +31,7 @@ public sealed class PathMapper(AppConfig config)
                 continue;
             }
 
-            if (TryResolveMappedRoot(qpath, source, target, out var resolved))
+            if (TryResolveMappedRoot(qpath, source, target, out var resolved) && IsAvailablePathRoot(resolved))
             {
                 return resolved;
             }
@@ -55,7 +55,14 @@ public sealed class PathMapper(AppConfig config)
             var savedMappedPath = savedPath.StartsWith(@"\\", StringComparison.OrdinalIgnoreCase)
                 ? ResolveFromMappedDrives(savedPath)
                 : null;
-            return savedMappedPath ?? savedPath;
+            if (!string.IsNullOrWhiteSpace(savedMappedPath))
+            {
+                return savedMappedPath;
+            }
+            if (IsAvailablePathRoot(savedPath))
+            {
+                return savedPath;
+            }
         }
 
         if (qpath.StartsWith(@"\\", StringComparison.OrdinalIgnoreCase) || Path.IsPathFullyQualified(qpath))
@@ -63,7 +70,13 @@ public sealed class PathMapper(AppConfig config)
             return qpath;
         }
 
-        throw new InvalidOperationException("No path mapping matched this result. Add a mapping in Settings, or map the matching NAS share in Windows.");
+        var nasUncPath = ResolveNasUncPath(qpath);
+        if (!string.IsNullOrWhiteSpace(nasUncPath))
+        {
+            return nasUncPath;
+        }
+
+        throw new InvalidOperationException("Could not resolve this NAS result to a Windows path. Configure the NAS host or add a path mapping in Settings.");
     }
 
     public string? TryResolve(SearchResult result)
@@ -112,7 +125,7 @@ public sealed class PathMapper(AppConfig config)
             }
         }
 
-        return ResolveUncFromMappedDrives(qpath);
+        return ResolveUncFromMappedDrives(qpath) ?? ResolveNasUncPath(qpath);
     }
 
     private static string? ResolveExistingMappedPath(string qpath)
@@ -146,6 +159,47 @@ public sealed class PathMapper(AppConfig config)
         }
 
         return null;
+    }
+
+    private static bool IsAvailablePathRoot(string path)
+    {
+        var root = Path.GetPathRoot(path);
+        if (string.IsNullOrWhiteSpace(root) || !Regex.IsMatch(root, "^[A-Za-z]:\\\\$"))
+        {
+            return true;
+        }
+
+        return DriveInfo.GetDrives().Any(drive => drive.Name.Equals(root, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private string? ResolveNasUncPath(string qpath)
+    {
+        if (string.IsNullOrWhiteSpace(config.Host) ||
+            qpath.StartsWith(@"\\", StringComparison.OrdinalIgnoreCase) ||
+            Path.IsPathFullyQualified(qpath))
+        {
+            return null;
+        }
+
+        var host = config.Host.Trim().Trim('\\', '/');
+        if (host.Contains("://", StringComparison.OrdinalIgnoreCase) &&
+            Uri.TryCreate(host, UriKind.Absolute, out var uri))
+        {
+            host = uri.Host;
+        }
+        if (string.IsNullOrWhiteSpace(host) || host.IndexOfAny(['\\', '/', '?', '#']) >= 0)
+        {
+            return null;
+        }
+
+        var segments = qpath.TrimStart('\\')
+            .Split('\\', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (segments.Length == 0 || segments.Any(segment => segment is "." or ".."))
+        {
+            return null;
+        }
+
+        return @"\\" + host + "\\" + string.Join("\\", segments);
     }
 
     private static string? ResolveFromMappedDrives(string qpath)

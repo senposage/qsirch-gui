@@ -522,6 +522,18 @@
       <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
       <Setter Property="CaretBrush" Value="{DynamicResource AppTextBrush}" />
     </Style>
+    <Style TargetType="DatePicker">
+      <Setter Property="MinHeight" Value="32" />
+      <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+      <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+    </Style>
+    <Style TargetType="DatePickerTextBox">
+      <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+      <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+      <Setter Property="CaretBrush" Value="{DynamicResource AppTextBrush}" />
+    </Style>
     <Style TargetType="ListBox">
       <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}" />
       <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
@@ -662,10 +674,6 @@
         </Setter.Value>
       </Setter>
       <Style.Triggers>
-        <DataTrigger Binding="{Binding IsMatchingSearchFolder}" Value="True">
-          <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
-          <Setter Property="BorderThickness" Value="3,0,0,0" />
-        </DataTrigger>
         <Trigger Property="IsSelected" Value="True">
           <Setter Property="Foreground" Value="{DynamicResource AppSelectionTextBrush}" />
         </Trigger>
@@ -704,10 +712,6 @@
         </Setter.Value>
       </Setter>
       <Style.Triggers>
-        <DataTrigger Binding="{Binding IsMatchingSearchFolder}" Value="True">
-          <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
-          <Setter Property="BorderThickness" Value="3,0,0,0" />
-        </DataTrigger>
         <Trigger Property="IsSelected" Value="True">
           <Setter Property="Foreground" Value="{DynamicResource AppSelectionTextBrush}" />
         </Trigger>
@@ -773,15 +777,6 @@
         <TextBlock Text="{Binding FileName}"
                    TextTrimming="CharacterEllipsis"
                    VerticalAlignment="Center">
-          <TextBlock.Style>
-            <Style TargetType="TextBlock">
-              <Style.Triggers>
-                <DataTrigger Binding="{Binding IsMatchingSearchFolder}" Value="True">
-                  <Setter Property="FontWeight" Value="SemiBold" />
-                </DataTrigger>
-              </Style.Triggers>
-            </Style>
-          </TextBlock.Style>
         </TextBlock>
       </DockPanel>
     </DataTemplate>
@@ -1058,11 +1053,23 @@
                       Margin="0,0,8,0"
                       Checked="SearchContentsChanged"
                       Unchecked="SearchContentsChanged" />
+            <ToggleButton x:Name="DateRangeButton"
+                          Width="34"
+                          Content="&#xE787;"
+                          Style="{StaticResource CommandIconToggle}"
+                          ToolTip="Modified date range" />
             <ToggleButton x:Name="TypeFilterButton"
                           Width="148"
                           Content="{Binding TypeFilterSummary}"
                           Style="{StaticResource FilterMenuToggle}"
                           ToolTip="Filter by one or more file types" />
+            <Button Content="Clear filters"
+                    Style="{StaticResource CommandButton}"
+                    Margin="8,0,0,0"
+                    MinHeight="28"
+                    FontSize="12"
+                    Click="ClearFiltersClicked"
+                    ToolTip="Reset type, exact match, contents, date, and scope filters" />
             <StackPanel Orientation="Horizontal">
               <TextBlock Text="Scope"
                          Margin="10,0,5,0"
@@ -1134,6 +1141,44 @@
             </Border>
           </Popup>
           <Popup Placement="Bottom"
+                 PlacementTarget="{Binding ElementName=DateRangeButton}"
+                 IsOpen="{Binding IsChecked, ElementName=DateRangeButton, Mode=TwoWay}"
+                 StaysOpen="False"
+                 AllowsTransparency="True"
+                 PopupAnimation="Fade">
+            <Border Width="270"
+                    Background="{DynamicResource AppElevatedBrush}"
+                    BorderBrush="{DynamicResource AppBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="4"
+                    Padding="10">
+              <StackPanel>
+                <ComboBox x:Name="DatePresetBox"
+                          ItemsSource="{Binding DateRangePresets}"
+                          DisplayMemberPath="Name"
+                          SelectionChanged="DatePresetChanged" />
+                <Grid Margin="0,8,0,8">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="42" />
+                    <ColumnDefinition Width="*" />
+                  </Grid.ColumnDefinitions>
+                  <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                  </Grid.RowDefinitions>
+                  <TextBlock Text="From" VerticalAlignment="Center" Foreground="{DynamicResource AppMutedTextBrush}" />
+                  <DatePicker x:Name="DateFromPicker" Grid.Column="1" SelectedDateFormat="Short" />
+                  <TextBlock Grid.Row="1" Text="To" VerticalAlignment="Center" Foreground="{DynamicResource AppMutedTextBrush}" />
+                  <DatePicker x:Name="DateToPicker" Grid.Row="1" Grid.Column="1" Margin="0,6,0,0" SelectedDateFormat="Short" />
+                </Grid>
+                <DockPanel LastChildFill="False">
+                  <Button Content="Clear" Style="{StaticResource CommandButton}" Click="ClearDateRangeClicked" />
+                  <Button Content="Apply" Style="{StaticResource PrimaryButton}" Click="ApplyDateRangeClicked" DockPanel.Dock="Right" />
+                </DockPanel>
+              </StackPanel>
+            </Border>
+          </Popup>
+          <Popup Placement="Bottom"
                  PlacementTarget="{Binding ElementName=RecentSearchButton}"
                  IsOpen="{Binding IsChecked, ElementName=RecentSearchButton, Mode=TwoWay}"
                  StaysOpen="False"
@@ -1173,7 +1218,18 @@
       <TextBlock Grid.Column="1"
                  Text="{Binding StatusText}"
                  Margin="8,0,12,0"
-                 VerticalAlignment="Center" />
+                 VerticalAlignment="Center">
+        <TextBlock.Style>
+          <Style TargetType="TextBlock">
+            <Style.Triggers>
+              <DataTrigger Binding="{Binding IsResultLimitWarning}" Value="True">
+                <Setter Property="Foreground" Value="#E34D59" />
+                <Setter Property="FontWeight" Value="Bold" />
+              </DataTrigger>
+            </Style.Triggers>
+          </Style>
+        </TextBlock.Style>
+      </TextBlock>
       <TextBlock Grid.Column="2"
                  Text="{Binding CountText}"
                  Margin="12,0,0,0"
@@ -1468,7 +1524,7 @@
     </Grid>
 
     <TextBlock Grid.Row="6"
-               Text="v1.0.1  Written by Robert J Crane"
+               Text="v1.1.0  Written by Robert J Crane"
                Margin="14,0"
                VerticalAlignment="Center"
                Foreground="{DynamicResource AppMutedTextBrush}" />

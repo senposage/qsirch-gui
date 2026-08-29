@@ -37,6 +37,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private bool _isBusy;
     private bool _initializing = true;
     private bool _loadingTab;
+    private bool _suppressFilterChanges;
     private bool _clearButtonActive;
     private int _viewRefreshVersion;
     private double _iconGlyphSize = 54;
@@ -47,6 +48,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private bool _sortDescending = true;
     private List<ResultSortKey> _sortKeys = [new("recent", true)];
     private CancellationTokenSource? _paintCts;
+    private CancellationTokenSource? _typeFilterRefreshCts;
     private CancellationTokenSource? _previewCts;
     private int _favoritesLoadVersion;
     private ShellPreviewHost? _nativePreviewHost;
@@ -56,6 +58,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly Dictionary<string, ImageSource> _iconCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _iconLoadsInFlight = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _iconLoadGate = new(2);
+    private readonly SemaphoreSlim _folderMetadataGate = new(2);
     private SearchResult? _openFolderIconResult;
     private readonly SemaphoreSlim _favoriteWriteGate = new(1, 1);
     private readonly Dictionary<string, GridViewColumn> _detailColumns = new(StringComparer.OrdinalIgnoreCase);
@@ -89,6 +92,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _rules = new ResultRules(_config);
         Closed += (_, _) =>
         {
+            _typeFilterRefreshCts?.Cancel();
             _previewCts?.Cancel();
             ClearNativePreview();
             _qsirchClient.Dispose();
@@ -113,6 +117,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 SortValue = pinned.SortValue,
                 TypeIndex = pinned.TypeIndex,
                 TypeNames = pinned.TypeNames.ToList(),
+                DateFrom = pinned.DateFrom,
+                DateTo = pinned.DateTo,
                 IsPinned = true,
                 ResultLimit = configuredResultLimit(),
                 SearchOnFirstFocus = !string.IsNullOrWhiteSpace(pinned.Query),
@@ -135,6 +141,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ApplyBehavior();
         SearchContentsToggle.IsChecked = _config.Behavior.SearchContents;
         ExactMatchToggle.IsChecked = _config.Behavior.ExactMatch;
+        DateFromPicker.DisplayDateEnd = DateTime.Today;
+        DateToPicker.DisplayDateEnd = DateTime.Today;
+        DatePresetBox.SelectedItem = DateRangePresets[0];
+        SyncDateRangeControls(_selectedSearchTab);
         AppLogger.Info("app", $"main window ready config={ConfigStore.ConfigPath} log={AppLogger.LogPath} searchTimeout={Math.Clamp(_config.Behavior.SearchTimeoutSeconds, 15, 300)}s");
         _initializing = false;
     }
@@ -213,6 +223,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             OnPropertyChanged();
             LoadTabState(value);
             QueueInitialResultIcons(value, value.VisibleResults, CancellationToken.None);
+            QueueFolderModifiedDates(value.VisibleResults);
             if (value.SearchOnFirstFocus && !string.IsNullOrWhiteSpace(value.Query))
             {
                 value.SearchOnFirstFocus = false;
@@ -225,16 +236,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     [
         new() { Name = "All types", Category = "All", IncludeAllFiles = true, IncludeFolders = true },
         new() { Name = "Folders", IncludeFolders = true },
-        new() { Name = "Word", Extensions = ["doc", "docx", "docm", "dot", "dotx", "rtf"] },
-        new() { Name = "Excel", Extensions = ["xls", "xlsx", "xlsm", "xlsb", "csv"] },
-        new() { Name = "PowerPoint", Extensions = ["ppt", "pptx", "pptm", "pps", "ppsx"] },
-        new() { Name = "PDF", Extensions = ["pdf"] },
-        new() { Name = "OneNote", Extensions = ["one"] },
+        new() { Name = "Word", Category = "Documents", Extensions = ["doc", "docx", "docm", "dot", "dotx", "rtf"] },
+        new() { Name = "Excel", Category = "Documents", Extensions = ["xls", "xlsx", "xlsm", "xlsb", "csv"] },
+        new() { Name = "PowerPoint", Category = "Documents", Extensions = ["ppt", "pptx", "pptm", "pps", "ppsx"] },
+        new() { Name = "PDF", Category = "Documents", Extensions = ["pdf"] },
+        new() { Name = "OneNote", Category = "Documents", Extensions = ["one"] },
         new() { Name = "Email", Category = "Email", Extensions = ["eml", "msg"] },
-        new() { Name = "Text", Extensions = ["txt", "md", "log", "ini", "cfg"] },
-        new() { Name = "Images", Extensions = ["jpg", "jpeg", "png", "gif", "bmp", "webp", "tif", "tiff"] },
-        new() { Name = "Videos", Extensions = ["mp4", "mov", "mkv", "avi", "wmv", "m4v"] },
-        new() { Name = "Music", Extensions = ["mp3", "wav", "flac", "m4a", "aac", "wma"] },
+        new() { Name = "Text", Category = "Documents", Extensions = ["txt", "md", "log", "ini", "cfg"] },
+        new() { Name = "Images", Category = "Images", Extensions = ["jpg", "jpeg", "png", "gif", "bmp", "webp", "tif", "tiff"] },
+        new() { Name = "Videos", Category = "Videos", Extensions = ["mp4", "mov", "mkv", "avi", "wmv", "m4v"] },
+        new() { Name = "Music", Category = "Music", Extensions = ["mp3", "wav", "flac", "m4a", "aac", "wma"] },
         new() { Name = "Archives", Extensions = ["zip", "7z", "rar", "tar", "gz"] },
         new() { Name = "Code", Extensions = ["py", "js", "ts", "html", "css", "sql", "ps1", "bat", "cmd"] },
     ];
@@ -283,6 +294,19 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         new() { Name = "Modified recently", Key = "recent" },
     ];
 
+    public IReadOnlyList<DateRangePreset> DateRangePresets { get; } =
+    [
+        new("Any time", "any"),
+        new("Today", "today"),
+        new("This week", "week"),
+        new("This month", "month"),
+        new("Last month", "last_month"),
+        new("Last 3 months", "last_3_months"),
+        new("Last 6 months", "last_6_months"),
+        new("Last 12 months", "last_12_months"),
+        new("Custom range", "custom"),
+    ];
+
     public string Query
     {
         get => _query;
@@ -315,8 +339,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public string StatusText
     {
         get => _statusText;
-        set => SetField(ref _statusText, value);
+        set
+        {
+            if (SetField(ref _statusText, value))
+            {
+                OnPropertyChanged(nameof(IsResultLimitWarning));
+            }
+        }
     }
+
+    public bool IsResultLimitWarning => StatusText.StartsWith("Result limit reached", StringComparison.OrdinalIgnoreCase);
 
     public string CountText
     {
@@ -528,6 +560,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 SortValue = tab.SortValue,
                 TypeIndex = tab.TypeIndex,
                 TypeNames = tab.TypeNames.ToList(),
+                DateFrom = tab.DateFrom,
+                DateTo = tab.DateTo,
             })
             .ToList();
         ConfigStore.Save(_config);
@@ -545,6 +579,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             CountText = tab.CountText;
             ResultLocationText = tab.ResultLocationText;
             ApplyTypeSelection(tab.TypeNames, tab.TypeIndex);
+            SyncDateRangeControls(tab);
             ScopeBox.SelectedItem = SearchScopes.FirstOrDefault(scope => scope.Key.Equals(tab.ScopeKey, StringComparison.OrdinalIgnoreCase)) ?? SearchScopes[0];
             ViewBox.SelectedItem = ViewModes.FirstOrDefault(x => x.Key.Equals(tab.ViewKey, StringComparison.OrdinalIgnoreCase)) ?? ViewModes[^1];
             ApplySortMode(string.IsNullOrWhiteSpace(tab.SortValue) ? configuredSortOrDefault() : tab.SortValue);
@@ -733,7 +768,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             AppLogger.Info("search", "ignored empty query");
             return;
         }
-        var serverQuery = BuildServerQuery(query);
+        var serverQuery = BuildServerQuery(query, tab);
         _ = RecordRecentSearchAsync(query);
 
         var isNewQuery = !string.Equals(tab.ResultQuery, query, StringComparison.OrdinalIgnoreCase);
@@ -761,20 +796,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             var typeFilter = SelectedTypeFilter();
             var resultLimit = Math.Max(configuredResultLimit(), tab.ResultLimit);
-            var collapsedFoldersForLimit = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             bool CountsTowardResultLimit(SearchResult result) =>
                 !_rules.IsHidden(result) &&
                 MatchesExactQuery(result, query) &&
+                MatchesDateRange(result, tab) &&
                 MatchesType(result, typeFilter) &&
-                MatchesScope(result, tab) &&
-                (!_config.Behavior.CollapseMatchingFolderResults ||
-                 MatchingParentFolderPath(result, query) is not { } folderPath ||
-                 collapsedFoldersForLimit.Add(folderPath));
+                MatchesScope(result, tab);
             var nasStreamState = new NasStreamPaintState(await Task.Run(_history.StarredKeys, searchToken));
             streamState = nasStreamState;
             var results = await SearchNasWithSettlingRetryAsync(
                 tab,
                 _qsirchClient,
+                query,
                 serverQuery,
                 typeFilter,
                 showedCached,
@@ -793,11 +826,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 return results
                     .Where(result => !_rules.IsHidden(result))
                     .Where(result => MatchesExactQuery(result, query))
+                    .Where(result => MatchesDateRange(result, tab))
                     .Where(result => MatchesType(result, typeFilter))
                     .Where(result => MatchesScope(result, tab))
                     .ToList();
             });
-            var displayed = LimitRawResultsForDisplay(visible, resultLimit, query);
+            var displayed = LimitRawResultsForDisplay(visible, resultLimit);
             AppLogger.Info("search", $"version={searchVersion} nasResults={results.Count} visibleAfterFilters={visible.Count} filteredOut={results.Count - visible.Count} resultLimit={resultLimit}");
             if (streamState.Started)
             {
@@ -813,7 +847,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 return;
             }
             _ = LoadFavoritesAsync();
-            tab.ResultLimitReached = visible.Count >= resultLimit;
+            tab.ResultLimitReached = visible.Count >= resultLimit && !tab.NasPagingComplete;
             EmptyStateText = displayed.Count > 0
                 ? ""
                 : results.Count == 0
@@ -821,7 +855,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     : results.All(result => _rules.IsHidden(result))
                         ? "Matching items are hidden by access rules"
                         : "No results match the current filters";
-            SetTabStatus(tab, displayed.Count == 0 && results.Count > 0 ? "No visible results" : tab.ResultLimitReached ? "Result limit reached; load more for additional results" : "Ready", tab.CountText);
+            SetTabStatus(tab, displayed.Count == 0 && results.Count > 0 ? "No visible results" : tab.ResultLimitReached ? "Result limit reached. Load more for additional results" : "Ready", tab.CountText);
             if (IsActiveTab(tab))
             {
                 SaveCurrentTabState();
@@ -868,6 +902,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private async Task<IReadOnlyList<SearchResult>> SearchNasWithSettlingRetryAsync(
         SearchTabState tab,
         QsirchClient client,
+        string query,
         string serverQuery,
         FileTypeFilter typeFilter,
         bool showedCached,
@@ -884,19 +919,44 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var visibleCount = 0;
         var recentCutoff = DateTime.Today.AddDays(-30);
+        var hasDateRange = tab.HasDateRange;
+        tab.NasPagingComplete = false;
+
+        if (typeFilter.IncludeFolders)
+        {
+            await ThrottleInactiveTabAsync(tab, token);
+            SetTabStatus(tab, "Loading matching folders...", tab.CountText);
+            var directoryResults = await client.SearchDirectoriesAsync(query, Math.Min(resultLimit, 100), token);
+            var directoryAdded = AddUniqueResults(results, seen, directoryResults, countsTowardResultLimit);
+            visibleCount += directoryAdded.DisplayableAdded;
+            AppLogger.Info("search", $"version={searchVersion} nas directories query=\"{query}\" count={directoryResults.Count} added={directoryAdded.Added} visibleAdded={directoryAdded.DisplayableAdded} total={results.Count} visible={visibleCount}");
+            foreach (var directoryBatch in Batches(directoryResults, 10))
+            {
+                token.ThrowIfCancellationRequested();
+                if (!IsCurrentSearch(tab, searchVersion))
+                {
+                    return results;
+                }
+                await batchReceived(directoryBatch);
+            }
+        }
 
         await ThrottleInactiveTabAsync(tab, token);
-        SetTabStatus(tab, "Loading recent results...", tab.CountText);
+        var (serverSortBy, serverSortDir) = ServerSortFor(tab);
+        var initialSortBy = hasDateRange ? serverSortBy : "modified";
+        var initialSortDir = hasDateRange ? serverSortDir : "desc";
+        SetTabStatus(tab, hasDateRange ? "Loading selected date range..." : "Loading recent results...", tab.CountText);
         var recentPage = await client.SearchAsync(
             serverQuery,
             typeFilter,
             firstPageLimit,
             0,
-            "modified",
-            "desc",
-            batch => batchReceived(RecentResults(batch, recentCutoff)),
+            initialSortBy,
+            initialSortDir,
+            batch => batchReceived(hasDateRange ? batch : RecentResults(batch, recentCutoff)),
             token);
-        var recentAdded = AddUniqueResults(results, seen, RecentResults(recentPage, recentCutoff), countsTowardResultLimit);
+        var initialResults = hasDateRange ? recentPage : RecentResults(recentPage, recentCutoff);
+        var recentAdded = AddUniqueResults(results, seen, initialResults, countsTowardResultLimit);
         visibleCount += recentAdded.DisplayableAdded;
         AppLogger.Info("search", $"version={searchVersion} nas recent page offset=0 limit={firstPageLimit} count={recentPage.Count} recentAdded={recentAdded.Added} visibleAdded={recentAdded.DisplayableAdded} total={results.Count} visible={visibleCount}");
         if (!IsCurrentSearch(tab, searchVersion))
@@ -905,11 +965,19 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         await ThrottleInactiveTabAsync(tab, token);
-        SetTabStatus(tab, "Loading all results...", tab.CountText);
-        var firstPage = await client.SearchAsync(serverQuery, typeFilter, firstPageLimit, 0, batchReceived, token);
-        var firstAdded = AddUniqueResults(results, seen, firstPage, countsTowardResultLimit);
-        visibleCount += firstAdded.DisplayableAdded;
-        AppLogger.Info("search", $"version={searchVersion} nas page offset=0 limit={firstPageLimit} count={firstPage.Count} added={firstAdded.Added} visibleAdded={firstAdded.DisplayableAdded} total={results.Count} visible={visibleCount}");
+        var firstPage = recentPage;
+        if (!hasDateRange)
+        {
+            SetTabStatus(tab, "Loading all results...", tab.CountText);
+            firstPage = await client.SearchAsync(serverQuery, typeFilter, firstPageLimit, 0, serverSortBy, serverSortDir, batchReceived, token);
+            var firstAdded = AddUniqueResults(results, seen, firstPage, countsTowardResultLimit);
+            visibleCount += firstAdded.DisplayableAdded;
+            AppLogger.Info("search", $"version={searchVersion} nas page offset=0 limit={firstPageLimit} count={firstPage.Count} added={firstAdded.Added} visibleAdded={firstAdded.DisplayableAdded} total={results.Count} visible={visibleCount}");
+        }
+        else
+        {
+            AppLogger.Info("search", $"version={searchVersion} using date-range initial page count={firstPage.Count} total={results.Count} visible={visibleCount}");
+        }
         if (!IsCurrentSearch(tab, searchVersion))
         {
             return results;
@@ -926,12 +994,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 return results;
             }
 
-            var retryResults = await client.SearchAsync(serverQuery, typeFilter, firstPageLimit, 0, batchReceived, token);
+            var retryResults = await client.SearchAsync(serverQuery, typeFilter, firstPageLimit, 0, serverSortBy, serverSortDir, batchReceived, token);
             var retryAdded = AddUniqueResults(results, seen, retryResults, countsTowardResultLimit);
             visibleCount += retryAdded.DisplayableAdded;
             AppLogger.Info("search", $"version={searchVersion} nas retry offset=0 limit={firstPageLimit} count={retryResults.Count} added={retryAdded.Added} visibleAdded={retryAdded.DisplayableAdded} total={results.Count} visible={visibleCount}");
             if (retryResults.Count == 0)
             {
+                tab.NasPagingComplete = true;
                 return results;
             }
         }
@@ -946,12 +1015,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
 
             await ThrottleInactiveTabAsync(tab, token);
-            var page = await client.SearchAsync(serverQuery, typeFilter, nextPageLimit, offset, batchReceived, token);
+            var page = await client.SearchAsync(serverQuery, typeFilter, nextPageLimit, offset, serverSortBy, serverSortDir, batchReceived, token);
             var added = AddUniqueResults(results, seen, page, countsTowardResultLimit);
             visibleCount += added.DisplayableAdded;
             AppLogger.Info("search", $"version={searchVersion} nas page offset={offset} limit={nextPageLimit} count={page.Count} added={added.Added} visibleAdded={added.DisplayableAdded} total={results.Count} visible={visibleCount}");
             if (page.Count == 0)
             {
+                tab.NasPagingComplete = true;
                 AppLogger.Info("search", $"version={searchVersion} nas paging complete offset={offset} total={results.Count}");
                 break;
             }
@@ -1030,6 +1100,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 .Where(result => streamState.Seen.Add(HistoryStore.ResultKey(result)))
                 .Where(result => !_rules.IsHidden(result))
                 .Where(result => MatchesExactQuery(result, query))
+                .Where(result => MatchesDateRange(result, tab))
                 .Where(result => MatchesScope(result, tab))
                 .ToList();
         }, token);
@@ -1049,8 +1120,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         var displaySlots = Math.Max(0, tab.ResultLimit - streamState.DisplayedResultCount);
-        var displayedMatches = LimitRawResultsForDisplay(visibleMatches, displaySlots, query, streamState.CollapsedFolderPaths);
-        var presentation = BuildResultPresentation(displayedMatches, query, streamState.EmittedFolderPaths);
+        var displayedMatches = LimitRawResultsForDisplay(visibleMatches, displaySlots);
+        var presentation = BuildResultPresentation(displayedMatches);
         streamState.DisplayedResultCount += displayedMatches.Count;
         tab.AllResults.AddRange(visible);
         tab.VisibleResults.AddRange(presentation);
@@ -1084,14 +1155,19 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             CountText = ResultCountText(VisibleResults.Count);
             tab.CountText = CountText;
             QueueInitialResultIcons(tab, presentation, token);
+            QueueFolderModifiedDates(presentation);
             AppLogger.Info("paint", $"stream batch version={searchVersion} batch={visible.Count} rawDisplayed={displayedMatches.Count} presentation={presentation.Count} visible={VisibleResults.Count}");
         }, System.Windows.Threading.DispatcherPriority.Background);
     }
 
     private async void TypeFilterChanged(object sender, RoutedEventArgs e)
     {
+        if (_suppressFilterChanges)
+        {
+            return;
+        }
         OnPropertyChanged(nameof(TypeFilterSummary));
-        await ApplyTypeFilterAsync();
+        await ApplyTypeFilterChangeAsync();
     }
 
     private async void ClearTypeFiltersClicked(object sender, RoutedEventArgs e)
@@ -1101,7 +1177,66 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             option.IsSelected = false;
         }
         OnPropertyChanged(nameof(TypeFilterSummary));
-        await ApplyTypeFilterAsync();
+        await ApplyTypeFilterChangeAsync();
+    }
+
+    private async void ClearFiltersClicked(object sender, RoutedEventArgs e)
+    {
+        if (_initializing || _loadingTab)
+        {
+            return;
+        }
+
+        var tab = _selectedSearchTab;
+        var needsRefresh = TypeFilterOptions.Any(option => option.IsSelected) ||
+                           _config.Behavior.ExactMatch ||
+                           _config.Behavior.SearchContents ||
+                           tab?.HasDateRange == true;
+
+        _suppressFilterChanges = true;
+        try
+        {
+            foreach (var option in TypeFilterOptions)
+            {
+                option.IsSelected = false;
+            }
+            ExactMatchToggle.IsChecked = false;
+            SearchContentsToggle.IsChecked = false;
+            DateFromPicker.SelectedDate = null;
+            DateToPicker.SelectedDate = DateTime.Today;
+            DatePresetBox.SelectedItem = DateRangePresets[0];
+            ScopeBox.SelectedItem = SearchScopes[0];
+        }
+        finally
+        {
+            _suppressFilterChanges = false;
+        }
+
+        _config.Behavior.ExactMatch = false;
+        _config.Behavior.SearchContents = false;
+        ConfigStore.Save(_config);
+        OnPropertyChanged(nameof(TypeFilterSummary));
+
+        if (tab != null)
+        {
+            tab.DateFrom = null;
+            tab.DateTo = null;
+            tab.ScopeKey = "all";
+            tab.ScopePath = "";
+            UpdateDateRangeButton(tab);
+        }
+
+        if (!string.IsNullOrWhiteSpace(Query) && needsRefresh)
+        {
+            // Keep the current results visible while the broader unfiltered request arrives.
+            await SearchAsync();
+        }
+        else
+        {
+            await ApplyLocalFiltersAsync("Filters cleared");
+            StatusText = "Filters cleared";
+        }
+        SaveCurrentTabState();
     }
 
     private async Task ApplyTypeFilterAsync()
@@ -1117,6 +1252,51 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         catch (OperationCanceledException)
         {
+        }
+    }
+
+    private async Task ApplyTypeFilterChangeAsync()
+    {
+        var tab = _selectedSearchTab;
+        var shouldRefreshSearch = tab != null && !string.IsNullOrWhiteSpace(Query);
+        if (shouldRefreshSearch)
+        {
+            tab!.CancelSearch("type filter changed");
+            _paintCts?.Cancel();
+            SetTabBusy(tab, false);
+        }
+
+        await ApplyTypeFilterAsync();
+
+        if (!shouldRefreshSearch || tab == null)
+        {
+            return;
+        }
+
+        _typeFilterRefreshCts?.Cancel();
+        _typeFilterRefreshCts?.Dispose();
+        var refreshCts = new CancellationTokenSource();
+        _typeFilterRefreshCts = refreshCts;
+        try
+        {
+            await Task.Delay(175, refreshCts.Token);
+            if (refreshCts.IsCancellationRequested || !ReferenceEquals(_selectedSearchTab, tab) || string.IsNullOrWhiteSpace(Query))
+            {
+                return;
+            }
+
+            await SearchAsync();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        finally
+        {
+            if (ReferenceEquals(_typeFilterRefreshCts, refreshCts))
+            {
+                _typeFilterRefreshCts = null;
+            }
+            refreshCts.Dispose();
         }
     }
 
@@ -1176,7 +1356,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void ScopeChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_loadingTab || _initializing || _selectedSearchTab == null || ScopeBox.SelectedItem is not SearchScope scope)
+        if (_suppressFilterChanges || _loadingTab || _initializing || _selectedSearchTab == null || ScopeBox.SelectedItem is not SearchScope scope)
         {
             return;
         }
@@ -1995,7 +2175,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void SearchContentsChanged(object sender, RoutedEventArgs e)
     {
-        if (_initializing)
+        if (_suppressFilterChanges || _initializing)
         {
             return;
         }
@@ -2009,7 +2189,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void ExactMatchChanged(object sender, RoutedEventArgs e)
     {
-        if (_initializing)
+        if (_suppressFilterChanges || _initializing)
         {
             return;
         }
@@ -2019,6 +2199,129 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             await SearchAsync(clearExistingResults: true);
         }
+    }
+
+    private void DatePresetChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_initializing || _loadingTab || DatePresetBox.SelectedItem is not DateRangePreset preset)
+        {
+            return;
+        }
+
+        var range = DateRangeForPreset(preset.Key);
+        DateFromPicker.SelectedDate = range.From;
+        DateToPicker.SelectedDate = range.To ?? DateTime.Today;
+    }
+
+    private async void ApplyDateRangeClicked(object sender, RoutedEventArgs e)
+    {
+        var tab = _selectedSearchTab;
+        if (tab == null)
+        {
+            return;
+        }
+
+        var from = DateFromPicker.SelectedDate?.Date;
+        var to = DateToPicker.SelectedDate?.Date;
+        if (!from.HasValue && to == DateTime.Today)
+        {
+            await ApplyDateRangeAsync();
+            return;
+        }
+        if (from.HasValue != to.HasValue)
+        {
+            StatusText = "Choose both dates for a custom range";
+            return;
+        }
+        if (from > to)
+        {
+            StatusText = "The start date must be before the end date";
+            return;
+        }
+        if (from > DateTime.Today || to > DateTime.Today)
+        {
+            StatusText = "Dates cannot be in the future";
+            return;
+        }
+
+        tab.DateFrom = from;
+        tab.DateTo = to;
+        DateRangeButton.IsChecked = false;
+        UpdateDateRangeButton(tab);
+        if (tab.IsPinned)
+        {
+            SavePinnedTabs();
+        }
+        if (!string.IsNullOrWhiteSpace(Query))
+        {
+            await SearchAsync(clearExistingResults: true);
+        }
+    }
+
+    private async void ClearDateRangeClicked(object sender, RoutedEventArgs e)
+    {
+        DateFromPicker.SelectedDate = null;
+        DateToPicker.SelectedDate = DateTime.Today;
+        DatePresetBox.SelectedItem = DateRangePresets[0];
+        await ApplyDateRangeAsync();
+    }
+
+    private async Task ApplyDateRangeAsync()
+    {
+        var tab = _selectedSearchTab;
+        if (tab == null)
+        {
+            return;
+        }
+
+        tab.DateFrom = null;
+        tab.DateTo = null;
+        DateRangeButton.IsChecked = false;
+        UpdateDateRangeButton(tab);
+        if (tab.IsPinned)
+        {
+            SavePinnedTabs();
+        }
+        if (!string.IsNullOrWhiteSpace(Query))
+        {
+            await SearchAsync(clearExistingResults: true);
+        }
+    }
+
+    private void SyncDateRangeControls(SearchTabState? tab)
+    {
+        var range = tab?.HasDateRange == true
+            ? new DateRange(tab.DateFrom, tab.DateTo)
+            : new DateRange(null, null);
+        DateFromPicker.SelectedDate = range.From;
+        DateToPicker.SelectedDate = range.To ?? DateTime.Today;
+        DatePresetBox.SelectedItem = DateRangePresets.FirstOrDefault(preset => DateRangeForPreset(preset.Key) == range) ?? DateRangePresets[^1];
+        UpdateDateRangeButton(tab);
+    }
+
+    private void UpdateDateRangeButton(SearchTabState? tab)
+    {
+        var hasRange = tab?.HasDateRange == true;
+        DateRangeButton.FontWeight = hasRange ? FontWeights.SemiBold : FontWeights.Normal;
+        DateRangeButton.ToolTip = hasRange
+            ? $"Modified {tab!.DateFrom!.Value:MMM d, yyyy} to {tab.DateTo!.Value:MMM d, yyyy}"
+            : "Modified date range";
+    }
+
+    private static DateRange DateRangeForPreset(string key)
+    {
+        var today = DateTime.Today;
+        return key switch
+        {
+            "today" => new DateRange(today, today),
+            "week" => new DateRange(today.AddDays(-((7 + (int)today.DayOfWeek - (int)DayOfWeek.Monday) % 7)), today),
+            "month" => new DateRange(new DateTime(today.Year, today.Month, 1), today),
+            "last_month" => new DateRange(new DateTime(today.Year, today.Month, 1).AddMonths(-1), new DateTime(today.Year, today.Month, 1).AddDays(-1)),
+            "last_3_months" => new DateRange(today.AddMonths(-3).AddDays(1), today),
+            "last_6_months" => new DateRange(today.AddMonths(-6).AddDays(1), today),
+            "last_12_months" => new DateRange(today.AddYears(-1).AddDays(1), today),
+            _ => new DateRange(null, null),
+        };
     }
 
     private void PreviewToggleClicked(object sender, RoutedEventArgs e)
@@ -2245,19 +2548,50 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             .ToList();
     }
 
-    private string BuildServerQuery(string query)
+    private string BuildServerQuery(string query, SearchTabState tab)
     {
+        string serverQuery;
         if (query == "*")
         {
-            return ".";
+            serverQuery = ".";
         }
-        if (_config.Behavior.SearchContents || query.StartsWith("name:", StringComparison.OrdinalIgnoreCase))
+        else if (_config.Behavior.SearchContents || query.StartsWith("name:", StringComparison.OrdinalIgnoreCase))
         {
-            return query;
+            serverQuery = query;
+        }
+        else
+        {
+            var escaped = query.Replace("\"", "\\\"", StringComparison.Ordinal);
+            serverQuery = $"name:\"{escaped}\"";
         }
 
-        var escaped = query.Replace("\"", "\\\"", StringComparison.Ordinal);
-        return $"name:\"{escaped}\"";
+        return tab.HasDateRange
+            ? $"{serverQuery} modified:{tab.DateFrom!.Value:yyyy-MM-dd}..{tab.DateTo!.Value:yyyy-MM-dd}"
+            : serverQuery;
+    }
+
+    private (string? SortBy, string SortDir) ServerSortFor(SearchTabState tab)
+    {
+        var primary = ParseSortKeys(tab.SortValue).First();
+        return primary.Key switch
+        {
+            "recent" or "modified" => ("modified", primary.Descending ? "desc" : "asc"),
+            "name" => ("name", primary.Descending ? "desc" : "asc"),
+            "size" => ("size", primary.Descending ? "desc" : "asc"),
+            _ => (null, "desc"),
+        };
+    }
+
+    private static bool MatchesDateRange(SearchResult result, SearchTabState tab)
+    {
+        if (!tab.HasDateRange || result.IsFolder)
+        {
+            return true;
+        }
+
+        return result.ModifiedDate is { } modified &&
+               modified.Date >= tab.DateFrom!.Value.Date &&
+               modified.Date <= tab.DateTo!.Value.Date;
     }
 
     private bool MatchesExactQuery(SearchResult result, string query)
@@ -2278,130 +2612,27 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private IReadOnlyList<SearchResult> LimitRawResultsForDisplay(
         IEnumerable<SearchResult> results,
-        int limit,
-        string query,
-        ISet<string>? collapsedFolders = null)
+        int limit)
     {
-        var raw = results.Where(result => !result.IsSearchFolderPresentation).ToList();
-        if (!_config.Behavior.CollapseMatchingFolderResults)
-        {
-            return raw.Take(limit).ToList();
-        }
-
-        var displayed = new List<SearchResult>();
-        var seen = collapsedFolders ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var result in raw)
-        {
-            var key = MatchingParentFolderPath(result, query) ?? HistoryStore.ResultKey(result);
-            if (!seen.Add(key))
-            {
-                continue;
-            }
-
-            displayed.Add(result);
-            if (displayed.Count >= limit)
-            {
-                break;
-            }
-        }
-        return displayed;
-    }
-
-    private IReadOnlyList<SearchResult> BuildResultPresentation(
-        IEnumerable<SearchResult> results,
-        string query,
-        ISet<string>? emittedFolderPaths = null)
-    {
-        var raw = results.Where(result => !result.IsSearchFolderPresentation).ToList();
-        foreach (var result in raw)
-        {
-            result.IsMatchingSearchFolder = false;
-            result.ExplorerGroup = null;
-        }
-        if (!_config.Behavior.ShowMatchingParentFolders && !_config.Behavior.CollapseMatchingFolderResults)
-        {
-            return raw;
-        }
-
-        var foldersAlreadyReturned = raw
-            .Where(result => result.IsFolder)
-            .Select(ResultItemPath)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var emitted = emittedFolderPaths ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var presentation = new List<SearchResult>();
-        foreach (var result in raw)
-        {
-            var matchingFolderPath = MatchingParentFolderPath(result, query);
-            if (matchingFolderPath != null)
-            {
-                var group = new ExplorerResultGroup(
-                    matchingFolderPath,
-                    Path.GetFileName(matchingFolderPath),
-                    ParentPath(matchingFolderPath));
-                result.ExplorerGroup = group;
-                if (!foldersAlreadyReturned.Contains(matchingFolderPath) && emitted.Add(matchingFolderPath))
-                {
-                    presentation.Add(CreateSearchFolderResult(matchingFolderPath, result, group));
-                }
-
-                if (_config.Behavior.CollapseMatchingFolderResults &&
-                    !ResultItemPath(result).Equals(matchingFolderPath, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                if (result.IsFolder && ResultItemPath(result).Equals(matchingFolderPath, StringComparison.OrdinalIgnoreCase))
-                {
-                    result.IsMatchingSearchFolder = true;
-                }
-            }
-            else
-            {
-                result.ExplorerGroup = new ExplorerResultGroup("__other__", "Other results", "");
-            }
-
-            presentation.Add(result);
-        }
-        return presentation;
-    }
-
-    private string? MatchingParentFolderPath(SearchResult result, string query)
-    {
-        var candidate = result.IsFolder ? ResultItemPath(result) : ParentPath(ResultItemPath(result));
-        while (!string.IsNullOrWhiteSpace(candidate))
-        {
-            if (FolderNameMatchesQuery(Path.GetFileName(candidate), query))
-            {
-                return candidate;
-            }
-            candidate = ParentPath(candidate);
-        }
-        return null;
-    }
-
-    private bool FolderNameMatchesQuery(string folderName, string query)
-    {
-        var searchText = query.StartsWith("name:", StringComparison.OrdinalIgnoreCase)
-            ? query[5..].Trim().Trim('"')
-            : query.Trim();
-        var terms = System.Text.RegularExpressions.Regex.Matches(searchText, "[\\p{L}\\p{N}_]+")
-            .Select(match => match.Value)
-            .Where(term => term.Length > 0)
+        return results
+            .DistinctBy(HistoryStore.ResultKey, StringComparer.OrdinalIgnoreCase)
+            .Take(limit)
             .ToList();
-        if (terms.Count == 0 || string.IsNullOrWhiteSpace(folderName))
-        {
-            return false;
-        }
+    }
 
-        if (!_config.Behavior.ExactMatch || _config.Behavior.SearchContents)
+    private static IReadOnlyList<SearchResult> BuildResultPresentation(IEnumerable<SearchResult> results)
+    {
+        var raw = results
+            .DistinctBy(HistoryStore.ResultKey, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        foreach (var result in raw)
         {
-            return terms.All(term => folderName.Contains(term, StringComparison.OrdinalIgnoreCase));
+            var parentPath = ParentPath(ResultItemPath(result));
+            result.ExplorerGroup = string.IsNullOrWhiteSpace(parentPath)
+                ? new ExplorerResultGroup("__other__", "Other results", "")
+                : new ExplorerResultGroup(parentPath, Path.GetFileName(parentPath), ParentPath(parentPath));
         }
-
-        return terms.All(term => System.Text.RegularExpressions.Regex.IsMatch(
-            folderName,
-            $"(?<![\\p{{L}}\\p{{N}}_]){System.Text.RegularExpressions.Regex.Escape(term)}(?![\\p{{L}}\\p{{N}}_])",
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase));
+        return raw;
     }
 
     private static string ResultItemPath(SearchResult result)
@@ -2437,21 +2668,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         };
     }
 
-    private static SearchResult CreateSearchFolderResult(string folderPath, SearchResult source, ExplorerResultGroup group) => new()
-    {
-        Name = Path.GetFileName(folderPath),
-        Path = folderPath,
-        ResolvedPath = source.IsFolder ? source.ResolvedPath : ParentPath(source.ResolvedPath),
-        WindowsPath = source.IsFolder ? source.WindowsPath : ParentPath(source.WindowsPath),
-        ShowInternalPath = source.ShowInternalPath,
-        Type = "folder",
-        Modified = source.Modified,
-        IsFolder = true,
-        IsSearchFolderPresentation = true,
-        IsMatchingSearchFolder = true,
-        ExplorerGroup = group,
-    };
-
     private void UpdateResultLocationBar(SearchResult? result = null)
     {
         result ??= SelectedResult();
@@ -2471,6 +2687,57 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
+    private void QueueFolderModifiedDates(IEnumerable<SearchResult> results)
+    {
+        foreach (var result in results)
+        {
+            if (!result.IsFolder || result.FolderMetadataChecked || !string.IsNullOrWhiteSpace(result.Modified) || !IsDrivePath(result.WindowsPath))
+            {
+                continue;
+            }
+
+            result.FolderMetadataChecked = true;
+            _ = LoadFolderModifiedDateAsync(result);
+        }
+    }
+
+    private async Task LoadFolderModifiedDateAsync(SearchResult result)
+    {
+        var enteredGate = false;
+        try
+        {
+            await _folderMetadataGate.WaitAsync();
+            enteredGate = true;
+            var modified = await Task.Run(() =>
+            {
+                try
+                {
+                    var value = Directory.GetLastWriteTime(result.WindowsPath);
+                    return value.Year >= 1980 ? value : (DateTime?)null;
+                }
+                catch
+                {
+                    return null;
+                }
+            });
+
+            if (modified.HasValue && !Dispatcher.HasShutdownStarted && !Dispatcher.HasShutdownFinished)
+            {
+                await Dispatcher.InvokeAsync(() => result.Modified = modified.Value.ToString("g"));
+            }
+        }
+        finally
+        {
+            if (enteredGate)
+            {
+                _folderMetadataGate.Release();
+            }
+        }
+    }
+
+    private static bool IsDrivePath(string path) =>
+        path.Length >= 3 && char.IsLetter(path[0]) && path[1] == ':' && path[2] == '\\';
+
     private void ApplyPathPresentation()
     {
         foreach (var result in _allResults.Concat(VisibleResults).Concat(FavoriteResults).Distinct())
@@ -2488,16 +2755,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private async Task ApplyLocalFiltersAsync(string statusText)
     {
         var typeFilter = SelectedTypeFilter();
-        var snapshot = _allResults.Where(result => !result.IsSearchFolderPresentation).ToList();
+        var snapshot = _allResults.ToList();
         AppLogger.Info("filter", $"status=\"{statusText}\" snapshot={snapshot.Count} type=\"{typeFilter.Name}\" sort=\"{_sortColumn}\" descending={_sortDescending}");
         var tab = _selectedSearchTab;
         var filtered = await Task.Run(() => snapshot
             .Where(result => MatchesType(result, typeFilter))
+            .Where(result => tab == null || MatchesDateRange(result, tab))
             .Where(result => tab == null || MatchesScope(result, tab))
             .ToList());
         if (tab != null)
         {
-            var limited = LimitRawResultsForDisplay(filtered, tab.ResultLimit, tab.ResultQuery);
+            var limited = LimitRawResultsForDisplay(filtered, tab.ResultLimit);
             await PaintVisibleResultsAsync(tab, limited, NextPaintToken(), statusText);
             EmptyStateText = filtered.Count > 0
                 ? ""
@@ -2509,15 +2777,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         var typeFilter = SelectedTypeFilter();
         var filtered = _allResults
-            .Where(result => !result.IsSearchFolderPresentation)
             .Where(result => MatchesType(result, typeFilter));
         var tab = _selectedSearchTab;
         if (tab != null)
         {
-            filtered = filtered.Where(result => MatchesScope(result, tab));
+            filtered = filtered
+                .Where(result => MatchesDateRange(result, tab))
+                .Where(result => MatchesScope(result, tab));
         }
-        var limited = LimitRawResultsForDisplay(filtered, tab?.ResultLimit ?? configuredResultLimit(), tab?.ResultQuery ?? Query);
-        VisibleResults.ReplaceAll(SortResults(BuildResultPresentation(limited, tab?.ResultQuery ?? Query)));
+        var limited = LimitRawResultsForDisplay(filtered, tab?.ResultLimit ?? configuredResultLimit());
+        VisibleResults.ReplaceAll(SortResults(BuildResultPresentation(limited)));
         CountText = ResultCountText(VisibleResults.Count);
         SaveCurrentTabState();
     }
@@ -2546,9 +2815,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private async Task ReplaceResultsAsync(SearchTabState tab, IEnumerable<SearchResult> results, CancellationToken token, string statusText)
     {
         var starred = await Task.Run(_history.StarredKeys, token);
-        var raw = results.Where(result => !result.IsSearchFolderPresentation).ToList();
-        var sorted = await Task.Run(() => SortResults(BuildResultPresentation(raw, tab.ResultQuery)).ToList(), token);
+        var raw = results.ToList();
         var typeFilter = SelectedTypeFilter();
+        var sorted = await Task.Run(() => SortResults(BuildResultPresentation(raw)).ToList(), token);
         var paintToken = IsActiveTab(tab) ? NextPaintToken(token) : token;
         tab.AllResults.Clear();
         tab.VisibleResults.Clear();
@@ -2588,6 +2857,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 VisibleResults.AddRange(visibleBatch);
                 CountText = ResultCountText(VisibleResults.Count);
                 QueueInitialResultIcons(tab, batch, paintToken);
+                QueueFolderModifiedDates(visibleBatch);
                 await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
             }
         }
@@ -2601,7 +2871,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async Task PaintVisibleResultsAsync(SearchTabState tab, IEnumerable<SearchResult> results, CancellationToken token, string statusText)
     {
-        var sorted = await Task.Run(() => SortResults(BuildResultPresentation(results, tab.ResultQuery)).ToList(), token);
+        var typeFilter = SelectedTypeFilter();
+        var sorted = await Task.Run(() => SortResults(BuildResultPresentation(results)).ToList(), token);
         tab.VisibleResults.Clear();
         SetTabStatus(tab, statusText, "");
         if (IsActiveTab(tab))
@@ -2620,6 +2891,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 VisibleResults.AddRange(batch);
                 CountText = ResultCountText(VisibleResults.Count);
                 QueueInitialResultIcons(tab, batch, token);
+                QueueFolderModifiedDates(batch);
                 await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
             }
         }
@@ -2672,7 +2944,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         var indexed = results.Select((item, index) => (item, index));
         IOrderedEnumerable<(SearchResult item, int index)> ordered = indexed
-            .OrderBy(x => x.item.IsMatchingSearchFolder ? 0 : _config.Behavior.FoldersFirst && x.item.IsFolder ? 1 : 2);
+            .OrderBy(x => _config.Behavior.FoldersFirst && x.item.IsFolder ? 1 : 2);
         foreach (var sort in _sortKeys)
         {
             ordered = ApplySortKey(ordered, sort);
@@ -2876,9 +3148,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return selected[0];
         }
 
+        var categories = selected
+            .Select(filter => filter.Category)
+            .Where(category => !string.IsNullOrWhiteSpace(category) && !category.Equals("All", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var canNarrowServerQuery = !selected.Any(filter => filter.IncludeFolders) && categories.Count == 1;
         return new FileTypeFilter
         {
             Name = TypeFilterSummary,
+            Category = canNarrowServerQuery ? categories[0] : "All",
             Extensions = selected.SelectMany(filter => filter.Extensions).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
             IncludeFolders = selected.Any(filter => filter.IncludeFolders),
         };
@@ -3553,6 +3832,10 @@ internal sealed class PreviewContent
 
 internal sealed record ResultSortKey(string Key, bool Descending);
 
+public sealed record DateRangePreset(string Name, string Key);
+
+internal sealed record DateRange(DateTime? From, DateTime? To);
+
 internal sealed record ConnectionSettings(string Host, int Port, bool Ssl, bool SslVerify, string User, string Password, int TimeoutSeconds)
 {
     public static ConnectionSettings Current(AppConfig config) => new(
@@ -3569,8 +3852,6 @@ internal sealed class NasStreamPaintState(HashSet<string> starred)
 {
     public HashSet<string> Starred { get; } = starred;
     public HashSet<string> Seen { get; } = new(StringComparer.OrdinalIgnoreCase);
-    public HashSet<string> EmittedFolderPaths { get; } = new(StringComparer.OrdinalIgnoreCase);
-    public HashSet<string> CollapsedFolderPaths { get; } = new(StringComparer.OrdinalIgnoreCase);
     public List<SearchResult> Received { get; } = [];
     private readonly HashSet<string> _receivedKeys = new(StringComparer.OrdinalIgnoreCase);
     public bool Started { get; set; }
@@ -3645,6 +3926,7 @@ public sealed class SearchTabState : INotifyPropertyChanged
     public string ResultQuery { get; set; } = "";
     public int ResultLimit { get; set; } = 500;
     public bool ResultLimitReached { get; set; }
+    public bool NasPagingComplete { get; set; }
     public bool IsPinned
     {
         get => _isPinned;
@@ -3669,6 +3951,9 @@ public sealed class SearchTabState : INotifyPropertyChanged
     public List<string> TypeNames { get; set; } = [];
     public string ScopeKey { get; set; } = "all";
     public string ScopePath { get; set; } = "";
+    public DateTime? DateFrom { get; set; }
+    public DateTime? DateTo { get; set; }
+    public bool HasDateRange => DateFrom.HasValue && DateTo.HasValue;
     public bool SearchOnFirstFocus { get; set; }
     public int IconLoadRequests { get; set; }
     public CancellationTokenSource? SearchCts { get; set; }

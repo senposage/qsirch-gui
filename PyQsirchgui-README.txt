@@ -1,4 +1,4 @@
-PyQsirchgui v1.0.1
+PyQsirchgui v1.1.0
 Written by Robert J Crane
 
 PyQsirchgui is a portable Windows search window for QNAP Qsirch. It is designed to behave like a familiar Explorer search: search, open a file with its normal Windows application, or show it in File Explorer.
@@ -15,7 +15,10 @@ USING RESULTS
 - Select Show to open File Explorer with the result selected.
 - The displayed path is the normal Windows drive or UNC path. Qsirch's internal NAS path stays out of the interface unless advanced path display is explicitly enabled.
 - Use the file-type menu to choose one or more types. Clear the selection to search all types.
+- Folder rows are direct Qsirch folder matches and appear only when Folders is selected.
 - Use Exact match for whole-word filename searches.
+- Use Clear filters to reset type, exact match, contents, date, and scope without losing the current tab, view, or arrangement.
+- The date picker prevents future dates. Leaving From blank with To set to today searches every date; folder dates are read from their mapped Windows folder when available.
 - Use the View and Arrange controls to choose the Explorer-style presentation and sorting you prefer.
 
 FAVORITES AND SEARCHES
@@ -41,6 +44,8 @@ Portable connection and behavior settings live in config\config.json. Favorites,
 - PyQsirchgui.sessions.log: application launches, exits, and active users
 - PyQsirchgui.search.log: searches, filters, rules, and result rendering
 - PyQsirchgui.client.log: Qsirch connection and API activity
+
+PyQsirchgui reuses the current Windows user's securely stored Qsirch session and refreshes it once when it expires, avoiding repeated sign-ins during ordinary use.
 
 SUPPORT
 

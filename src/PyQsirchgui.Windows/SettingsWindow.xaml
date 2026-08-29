@@ -441,7 +441,7 @@
           <TextBox x:Name="UserBox" Grid.Row="2" Grid.Column="1" Margin="0,3" />
           <TextBlock Text="Password" Grid.Row="3" Margin="0,5" />
           <PasswordBox x:Name="PasswordBox" Grid.Row="3" Grid.Column="1" Margin="0,3" />
-          <CheckBox x:Name="SslBox" Content="Use HTTPS" Grid.Row="4" Grid.Column="1" Margin="0,8,0,0" />
+          <CheckBox x:Name="SslBox" Content="Use HTTPS (uses port 443 when the port is 8080)" Grid.Row="4" Grid.Column="1" Margin="0,8,0,0" />
           <CheckBox x:Name="SslVerifyBox" Content="Verify HTTPS certificate" Grid.Row="5" Grid.Column="1" Margin="0,4,0,0" />
         </Grid>
       </TabItem>
@@ -464,8 +464,6 @@
               <CheckBox x:Name="ClearResultsWithQueryBox" Content="Clear results when search text is cleared" Margin="0,4" />
               <CheckBox x:Name="AlwaysOnTopBox" Content="Always on top" Margin="0,4" />
               <CheckBox x:Name="FoldersFirstBox" Content="Show folders before files" Margin="0,4" />
-              <CheckBox x:Name="MatchingFoldersBox" Content="Show matching parent folders" Margin="0,4" />
-              <CheckBox x:Name="CollapseMatchingFoldersBox" Content="Collapse matching folders to one result" Margin="0,4" />
               <CheckBox x:Name="SearchContentsBox" Content="Search file contents" Margin="0,4" />
             </StackPanel>
             <StackPanel Grid.Column="1">

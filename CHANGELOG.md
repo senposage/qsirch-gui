@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.0 - Search Controls and Session Reliability
+
+- Added Clear filters, which resets type, Exact match, content, date, and scope filters without discarding the current tab, result view, sorting, or arrangement.
+- Made type-filter changes reliable during an active search by cancelling the stale request and rerunning the current tab with the new filter.
+- Replaced synthetic matching-parent folder rows with direct Qsirch folder results. Folders now appear only when Folders is selected in the type filter.
+- Added background mapped-path lookup for folder Date Modified values. Folder sizes remain intentionally blank so the application never starts a slow recursive network scan.
+- Improved modified-date filtering: To defaults to today, a blank From with To set to today means all dates, and future dates cannot be selected.
+- Improved Load more state so the result-limit notice clears automatically once Qsirch reports there are no more matches.
+- Added secure, per-Windows-user local reuse of Qsirch sessions, with one controlled sign-in recovery after a 401 response and backoff protection against repeated retries.
+- Updated in-app Help and the packaged readme for the current filters, folders, dates, paging, and connection behavior.
+
 ## 1.0.1 - Reliability Update
 
 - Fixed Copy full path when another Windows application temporarily owns the clipboard. PyQsirchgui now retries automatically and shows a clear status message only if the clipboard remains unavailable.
@@ -13,7 +24,7 @@
 - Delivered Explorer-style Details, List, Small Icons, and Large Icons result views with Windows shell icons, folders-first ordering, column visibility, multi-column sorting, folder grouping, and multi-select file-type filtering.
 - Added search tabs with per-tab query, view, sorting, filter, result, stop, and pin state. Pinned tabs persist per machine and refresh when revisited.
 - Added Favorites, user-private group folders, saved searches, recent searches, bulk favorite actions, and contextual removal/deletion actions.
-- Added familiar Open and Show actions, right-click menus, exact filename matching, matching-parent folder rows, and optional collapsed folder results.
+- Added familiar Open and Show actions, right-click menus, exact filename matching, direct folder results, and folder grouping.
 - Added a native Windows preview pane for compatible registered shell preview handlers. Qsirch is not used to download preview content; videos are excluded.
 
 ### Configuration and deployment

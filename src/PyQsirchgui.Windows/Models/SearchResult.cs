@@ -14,6 +14,7 @@ public sealed class SearchResult : INotifyPropertyChanged
     private List<string> _groups = [];
     private string _resolvedPath = "";
     private string _windowsPath = "";
+    private string _modified = "";
     private bool _showInternalPath;
 
     public string Name { get; set; } = "";
@@ -51,10 +52,24 @@ public sealed class SearchResult : INotifyPropertyChanged
     }
     public string Type { get; set; } = "";
     public long Size { get; set; }
-    public string Modified { get; set; } = "";
+    public string Modified
+    {
+        get => _modified;
+        set
+        {
+            var normalized = value ?? "";
+            if (_modified == normalized)
+            {
+                return;
+            }
+            _modified = normalized;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(ModifiedDate));
+            OnPropertyChanged(nameof(ModifiedGroup));
+        }
+    }
     public bool IsFolder { get; set; }
-    public bool IsSearchFolderPresentation { get; set; }
-    public bool IsMatchingSearchFolder { get; set; }
+    public bool FolderMetadataChecked { get; set; }
     public ExplorerResultGroup? ExplorerGroup { get; set; }
     public bool ShowInternalPath
     {
